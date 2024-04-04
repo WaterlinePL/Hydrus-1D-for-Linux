@@ -11,10 +11,10 @@ ifeq ($(UNAME_S),Linux)
 	CC = /usr/bin/gfortran
 endif
 
-objects = HYDRUS.o  HYSTER.o  INPUT.o  MATERIAL.o  OUTPUT.o  SINK.o  SOLUTE.o  TEMPER.o  TIME.o  WATFLOW.o
-FFLAGS = -g -ffpe-trap=zero,invalid,overflow,underflow
+objects = HYDRUS.o  HYSTER.o  INPUT.o  MATERIAL.o  OUTPUT.o  SINK.o  SOLUTE.o  TEMPER.o  TIME.o  WATFLOW.o METEO.o
+FFLAGS =
 
-hydrus: HYDRUS.o  HYSTER.o  INPUT.o  MATERIAL.o  OUTPUT.o  SINK.o  SOLUTE.o  TEMPER.o  TIME.o  WATFLOW.o
+hydrus: $(objects)
 	$(CC) -o hydrus $(objects)
 %.o : %.FOR
 	$(CC) $(FFLAGS) -c $< 

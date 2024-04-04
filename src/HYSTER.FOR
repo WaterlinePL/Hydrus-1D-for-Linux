@@ -13,7 +13,7 @@
      !     Theta(NumNP),Con(NumNP),Cap(NumNP)
       dimension MatNum(NumNP),Kappa(NumNP)
       common /properties/ ALPHAD,ALPHAI,XN,XM,XXM,SM,SARWI,IPATH,IHYST,
-     !                    XNW,XMW,XXMW
+     !                    XNW,XMW,XXMW,XL
       common /glob/ RHSW(1001,7),RASW(1001,7),SARW(1001),RSWAW(1001),
      !              PHSW(1001),MPSW(1001),JJH(1001),IPSW(1001) 
       common /local/ SW,SRAW,SAT,RSW,RAW,PERMW,MPSW1,JJJH,IPSW1,ILSW,
@@ -77,6 +77,7 @@ c        SARWI=(ParD(2,m)-ParW(2,m))/ParD(2,m)
         Theta(n)=SW*ParD(2,m)
 c        Theta(n)=SW*(ParD(2,m)-ParD(1,m))+ParD(1,m)
         Con(n)=ParD(5,m)*sngl(PermW)
+        XL=ParD(6,m)
         Cap(n)=sngl(DWW)*ParD(2,m)
         if(JJH(n).eq.0) Kappa(n)=-1
         if(JJH(n).eq.1) Kappa(n)= 1
@@ -125,7 +126,7 @@ c        Theta(n)=SW*(ParD(2,m)-ParD(1,m))+ParD(1,m)
       implicit real*8 (A-H,O-Z)
       implicit integer*4 (I-N)
       common /properties/ ALPHAD,ALPHAI,XN,XM,XXM,SM,SARWI,IPATH,IHYST,
-     !                    XNW,XMW,XXMW 
+     !                    XNW,XMW,XXMW,XL 
       common /glob/ RHSW(1001,7),RASW(1001,7),SARW(1001),RSWAW(1001),
      !              PHSW(1001),MPSW(1001),JJH(1001),IPSW(1001) 
       common /local/ SW,SRAW,SAT,RSW,RAW,PERMW,MPSW1,JJJH,IPSW1,ILSW,
@@ -242,7 +243,7 @@ c      IF( IRES .GE. 1) GO TO 210
       implicit real*8 (A-H,O-Z)
       implicit integer*4 (I-N)
       common /properties/ ALPHAD,ALPHAI,XN,XM,XXM,SM,SARWI,IPATH,IHYST,
-     !                    XNW,XMW,XXMW 
+     !                    XNW,XMW,XXMW,XL 
       common /glob/ RHSW(1001,7),RASW(1001,7),SARW(1001),RSWAW(1001),
      !              PHSW(1001),MPSW(1001),JJH(1001),IPSW(1001) 
       common /local/ SW,SRAW,SAT,RSW,RAW,PERMW,MPSW1,JJJH,IPSW1,ILSW,
@@ -293,7 +294,7 @@ c      IF( IRES .GE. 1) GO TO 210
       implicit real*8 (A-H,O-Z)
       implicit integer*4 (I-N)
       common /properties/ ALPHAD,ALPHAI,XN,XM,XXM,SM,SARWI,IPATH,IHYST,
-     !                    XNW,XMW,XXMW 
+     !                    XNW,XMW,XXMW,XL 
       common /glob/ RHSW(1001,7),RASW(1001,7),SARW(1001),RSWAW(1001),
      !              PHSW(1001),MPSW(1001),JJH(1001),IPSW(1001) 
       common /local/ SW,SRAW,SAT,RSW,RAW,PERMW,MPSW1,JJJH,IPSW1,ILSW,
@@ -445,7 +446,7 @@ c      IF( IRES .GE. 1) GO TO 210
       implicit real*8 (A-H,O-Z)
       implicit integer*4 (I-N)
       common /properties/ ALPHAD,ALPHAI,XN,XM,XXM,SM,SARWI,IPATH,IHYST,
-     !                    XNW,XMW,XXMW 
+     !                    XNW,XMW,XXMW,XL 
       common /glob/ RHSW(1001,7),RASW(1001,7),SARW(1001),RSWAW(1001),
      !              PHSW(1001),MPSW(1001),JJH(1001),IPSW(1001) 
       common /local/ SW,SRAW,SAT,RSW,RAW,PERMW,MPSW1,JJJH,IPSW1,ILSW,
@@ -499,7 +500,7 @@ c      IF( IRES .GE. 1) GO TO 210
         P3 = CSATW*(ONE-RSW**XXM)**XM
       ENDIF  
       P0 = ONE-(ONE-CSATW)*(ONE-ASW**XXM)**XM
-      PERMW = (ESW**.5)*(P0-P3)**2.
+      PERMW = (ESW**XL)*(P0-P3)**2.
       GOTO 110
 
 *     Derivative terms for hysteresis option
@@ -511,7 +512,7 @@ c      IF( IRES .GE. 1) GO TO 210
 *     Permeability terms for hysteresis option
 
       P0 = ONE-(ONE-ESW**XXM)**XM
-      PERMW = (ESW**.5)*(P0**2.)
+      PERMW = (ESW**XL)*(P0**2.)
   110 CONTINUE
 
 *     Relative permeability error message
@@ -537,7 +538,7 @@ c      IF( IRES .GE. 1) GO TO 210
       implicit real*8 (A-H,O-Z)
       implicit integer*4 (I-N)
       common /properties/ ALPHAD,ALPHAI,XN,XM,XXM,SM,SARWI,IPATH,IHYST,
-     !                    XNW,XMW,XXMW 
+     !                    XNW,XMW,XXMW,XL 
       common /glob/ RHSW(1001,7),RASW(1001,7),SARW(1001),RSWAW(1001),
      !              PHSW(1001),MPSW(1001),JJH(1001),IPSW(1001) 
       common /local/ SW,SRAW,SAT,RSW,RAW,PERMW,MPSW1,JJJH,IPSW1,ILSW,
@@ -564,7 +565,7 @@ c      IF( IRES .GE. 1) GO TO 210
       CSATW=SRAW/(ONE-RSW)
       P3=((ONE-RSW**XXM)**XM)-((ONE-ASW**XXM)**XM)
       P3=CSATW*P3
-      PERMW=(ESW**.5)*((P0-P3)**2.)
+      PERMW=(ESW**XL)*((P0-P3)**2.)
 
 *     Derivative terms for hysteresis option
 
@@ -595,7 +596,7 @@ c      IF( IRES .GE. 1) GO TO 210
       implicit real*8 (A-H,O-Z)
       implicit integer*4 (I-N)
       common /properties/ ALPHAD,ALPHAI,XN,XM,XXM,SM,SARWI,IPATH,IHYST,
-     !                    XNW,XMW,XXMW 
+     !                    XNW,XMW,XXMW,XL 
       common /glob/ RHSW(1001,7),RASW(1001,7),SARW(1001),RSWAW(1001),
      !              PHSW(1001),MPSW(1001),JJH(1001),IPSW(1001) 
       common /local/ SW,SRAW,SAT,RSW,RAW,PERMW,MPSW1,JJJH,IPSW1,ILSW,
@@ -622,7 +623,7 @@ c      IF( IRES .GE. 1) GO TO 210
       CSATW = SRAW/(ONE-RSW)
       P3 = ((ONE-RSW**XXM)**XM)-((ONE-ASW**XXM)**XM)
       P3 = CSATW*P3
-      PERMW = (ESW**.5)*((P0-P3)**2.)
+      PERMW = (ESW**XL)*((P0-P3)**2.)
 
 *     Derivative terms for hysteresis option
 
@@ -654,7 +655,7 @@ c      IF( IRES .GE. 1) GO TO 210
       implicit real*8 (A-H,O-Z)
       implicit integer*4 (I-N)
       common /properties/ ALPHAD,ALPHAI,XN,XM,XXM,SM,SARWI,IPATH,IHYST,
-     !                    XNW,XMW,XXMW 
+     !                    XNW,XMW,XXMW,XL 
       common /glob/ RHSW(1001,7),RASW(1001,7),SARW(1001),RSWAW(1001),
      !              PHSW(1001),MPSW(1001),JJH(1001),IPSW(1001) 
       common /local/ SW,SRAW,SAT,RSW,RAW,PERMW,MPSW1,JJJH,IPSW1,ILSW,

@@ -8,14 +8,15 @@
      !                  qDrain,zBotDr,BaseGW,rSpacing,iPosDr,rKhTop,
      !                  rKhBot,rKvTop,rKvBot,Entres,WetPer,zInTF,GeoFac,
      !                  lInitW,lVarBC,xConv,tConv,lMeteo,lVapor,iVer,
-     !                  lPrint,lCentrif,lSnow,hSeep,lFlux,lActRSU,ierr)
+     !                  lPrint,lCentrif,lSnow,hSeep,lFlux,lActRSU,
+     !                  lIrrig,iDrKod,ierr)
 
       character*72 Hed
       character*5 LUnit,TUnit,MUnit
       logical TopInF,BotInF,ShortO,lWat,lChem,lTemp,SinkF,WLayer,qGWLF,
      !        FreeD,SeepF,AtmBC,lRoot,lWDep,lEquil,lScreen,qDrain,
      !        lInitW,lVarBC,lPrint,lMeteo,lVapor,lCentrif,lSnow,lFlux,
-     !        lActRSU,lDummy
+     !        lActRSU,lIrrig,lDummy
       dimension iUnit(NUnitD)
 
 *---- START gettim and getdat gnu alternative function PARAMETERS ----
@@ -41,9 +42,10 @@
       if(iVer.eq.3) then
         read(30,*,err=901)
         read(30,*,err=901) lSnow,lDummy,lDummy,lDummy
-      else if(iVer.eq.4) then
+      else if(iVer.ge.4) then
         read(30,*,err=901)
-        read(30,*,err=901) lSnow,lDummy,lMeteo,lVapor,lActRSU,lFlux
+        read(30,*,err=901) lSnow,lDummy,lMeteo,lVapor,lActRSU,lFlux,
+     !                     lIrrig
       end if
       if(lSnow.and..not.lTemp) lSnow=.false.
       read(30,*,err=901)
@@ -73,6 +75,7 @@
      !   .not.qGWLF.and..not.FreeD.and..not.SeepF.and..not.qDrain)) then
         read(30,*,err=902)
         read(30,*,err=902) rTop,rBot,rRoot  !,hCritS,hCritA
+        if(qGWLF.or.FreeD.or.SeepF.or.qDrain) rBot=0.
       else
         rTop=0.
         rBot=0.
@@ -85,11 +88,16 @@
       if(qDrain) then
         read(30,*,err=902)
         read(30,*,err=902) iPosDr
+        iDrKod=0
+        if(iPosDr.gt.10) then
+          iDrKod=1
+          iPosDr=iPosDr-10
+        end if
         read(30,*,err=902)
         read(30,*,err=902) zBotDr,rSpacing,Entres
         zBotDr=-abs(zBotDr)
         read(30,*,err=902)
-        if(iPosDr.eq.1) then
+        if ((iPosDr.eq.1).or.(iPosDr.eq.6)) then
           read(30,*,err=902) rKhTop
         else if(iPosDr.eq.2) then
           read(30,*,err=902) BaseGW,rKhTop,WetPer
@@ -132,10 +140,10 @@
         write(*,*)'|   transport of solutes involved in sequential    |'
         write(*,*)'|         first-order decay reactions              |'
         write(*,*)'|                                                  |'
-        write(*,*)'|         Based on updated version 4.08            |'
+        write(*,*)'|         Based on updated version 4.14            |'
         write(*,*)'|     enhanced to run on linux-based systems       |'
         write(*,*)'|                                                  |'
-        write(*,*)'|           Last modified: April, 2022             |'
+        write(*,*)'|           Last modified: Dec, 2023               |'
         write(*,*)'|                                                  |'
         write(*,*)'----------------------------------------------------'
         write(*,*)
@@ -162,7 +170,7 @@ c        read(*,*)
 *        call getdat(ii,imonth,iday)
 *        call gettim(ihours,mins,isecs,ii)
 *---- END gettim and getdat gnu alternative function ----
-        write(iUnit(i),100,err=903) iday,imonth,ihours,mins,isecs
+        write(iUnit(i),100,err=903) iday,imonth,iYear,ihours,mins,isecs
         write(iUnit(i),*,err=903)'Units: L = ',LUnit,', T = ',TUnit,
      !                                ', M = ',MUnit
 11    continue
@@ -192,7 +200,8 @@ c        read(*,*)
 903   ierr=3
       return
 
-100   format(' Date: ',i3,'.',i2,'.','    Time: ',i3,':',i2,':',i2)
+100   format(' Date: ',i3,'.',i2,'.',i4,'    Time: ',i3,':',i2,':'
+     !,i2)
 110   format(f6.3,i5,f8.3,f8.5)
 120   format(13l6)
       end
@@ -225,19 +234,19 @@ c        read(*,*)
 
 ************************************************************************
 
-      subroutine NodInf(NumNPD,NumNP,NObsD,NObs,hTop,hBot,x,hNew,hOld,
-     !                  MatNum,hTemp,LayNum,Beta,Ah,AK,ATh,Conc,Sorb,
-     !                  TempN,TempO,Node,NSD,NS,xSurf,lChem,lTemp,
-     !                  lEquil,lScreen,lBact,Sorb2,ierr,lPrint,lFlux,
-     !                  lDualNEq)
+      subroutine NodInf(NumNPD,NumNP,hTop,hBot,x,hNew,hOld,MatNum,hTemp,
+     !                  LayNum,Beta,Ah,AK,ATh,Conc,Sorb,TempN,TempO,NSD,
+     !                  NS,xSurf,lChem,lTemp,lEquil,lScreen,lBact,Sorb2,
+     !                  lSolub,ierr,lAPI,cRootIni,lDualNEq,lDblVeg,
+     !                  Beta2)
 
-      character*30 Text1,Text2,Text3
       dimension x(NumNPD),hNew(NumNPD),hOld(NumNPD),MatNum(NumNPD),
      !          hTemp(NumNPD),LayNum(NumNPD),Beta(NumNPD),Ah(NumNPD),
      !          AK(NumNPD),ATh(NumNPD),Conc(NSD,NumNPD),TempN(NumNPD),
-     !          TempO(NumNPD),Node(NObsD),Sorb(NSD,NumNPD),SConc(5),
-     !          SSorb(5),C(5),S(5),Sorb2(NSD,NumNPD)
-      logical lChem,lTemp,lEquil,lScreen,lPrint,lBact,lDualNEq,lFlux
+     !          TempO(NumNPD),Sorb(NSD,NumNPD),SConc(5),
+     !          SSorb(5),C(5),S(5),Sorb2(NSD,NumNPD),Beta2(NumNPD)
+      logical lChem,lTemp,lEquil,lScreen,lBact,lSolub,lAPI,lDualNEq,
+     !        lDblVeg
 
       if(lScreen) write(*,*) 'reading nodal information'
       iVer = iGetFileVersion(32,1)
@@ -251,7 +260,7 @@ c        read(*,*)
         return
       end if
       if(NS.gt.NSD) then
-        ierr=5
+        ierr=4
         return
       end if
 
@@ -278,13 +287,18 @@ c        read(*,*)
       Beta(n)=B
       Ah(n)=Ax
       AK(n)=Bx
+      if(.not.lDblVeg.and.abs(Dx).lt.1.e-4) Dx=1.
       ATh(n)=Dx
       TempO(n)=Te
       do 1 ii=1,NS
         if(lChem) then
           Conc(ii,n)=C(ii)
-          if(.not.lEquil)       Sorb (ii,n)=S(ii)
-          if(lBact.or.lDualNEq) Sorb2(ii,n)=0.
+          if(.not.lEquil)                 Sorb (ii,n)=S(ii)
+          if(lBact.or.lSolub.or.lDualNEq) Sorb2(ii,n)=0.
+          if(lSolub) then
+            Sorb2(ii,n)=Sorb(ii,n)
+            Sorb(ii,n)=0.
+          end if
         end if
 1     continue
 
@@ -317,7 +331,7 @@ c        read(*,*)
           do 16 ii=1,NS
             Conc(ii,i)=Conc(ii,nOld)-SConc(ii)*dx
             Sorb(ii,i)=Sorb(ii,nOld)-SSorb(ii)*dx
-            if(lBact.or.lDualNEq) 
+            if(lBact.or.lSolub.or.lDualNEq) 
      !        Sorb2(ii,i)=Sorb2(ii,nOld)-SSorb(ii)*dx
 16        continue
         end if
@@ -329,22 +343,38 @@ c        read(*,*)
       nOld=n
       if(j.gt.1) goto 12
 
-      SBeta=0.
-      if(Beta(NumNP).gt.0.) SBeta=Beta(NumNP)*(x(NumNP)-x(NumNP-1))/2.
+      SBeta1=0.
+      if(Beta(NumNP).gt.0.) SBeta1=Beta(NumNP)*(x(NumNP)-x(NumNP-1))/2.
+      SBeta2=0.
+      if(lDblVeg.and.Ath(NumNP).gt.0.)
+     !                      SBeta2=Ath(NumNP)*(x(NumNP)-x(NumNP-1))/2. 
       do 19 i=2,NumNP-1
-        if(Beta(i).gt.0.) SBeta=SBeta+Beta(i)*(x(i+1)-x(i-1))/2.
+        if(Beta(i).gt.0.) SBeta1=SBeta1+Beta(i)*(x(i+1)-x(i-1))/2.
+        if(lDblVeg.and.Ath(i).gt.0.) 
+     !                    SBeta2=SBeta2+Ath(i)*(x(i+1)-x(i-1))/2.
 19    continue
       do 20 i=2,NumNP
-        if(SBeta.gt.0.) then
-          Beta(i)=Beta(i)/SBeta
+        if(SBeta1.gt.0.) then
+          if(Beta(i).gt.0.) Beta(i)=Beta(i)/SBeta1
         else
           Beta(i)=0.
         end if
+        if(lDblVeg.and.SBeta2.gt.0.) then
+          Beta2(i)=Ath(i)/SBeta2
+        else
+          Beta2(i)=0.
+        end if
 20    continue
       xSurf=x(NumNP)
+      if(lDblVeg) then
+        do 23 i=1,NumNP
+          Ath(i)=1.
+23      continue
+      end if
 
 *     Print nodal information
       write(50,110,err=902)
+      cRootIni=0.
       do 21 n=NumNP,1,-1
         if(.not.lChem.and..not.lTemp) then
           write(50,120,err=902) NumNP-n+1,x(n),hOld(n),MatNum(n),
@@ -366,27 +396,58 @@ c        read(*,*)
         hNew(n) =hOld(n)
         hTemp(n)=hOld(n)
         TempN(n)=TempO(n)
+        if(lAPI.and.lChem.and.Beta(n).gt.0..and.Conc(1,n).gt.cRootIni) 
+     !     cRootIni=Conc(1,n)  
 21    continue
       write(50,'(''end'')',err=902)
       hBot=hNew(1)
       hTop=hNew(NumNP)
       write(50,130,err=902) NS
+      return
+
+*     Error when reading from an input file
+901   ierr=1
+      return
+*     Error when writing into an output file
+902   ierr=2
+      return
+
+110   format (/'Nodal point information'//
+     !'node      x         hOld    MatN LayN  Beta      Ah       AK ',
+     !'     ATh     Temp    Conc(1...NS)         Sorb(1...NS)'/)
+120   format (i4,2f11.3,2i5,f8.3,3f9.3,f8.2,10e12.4,10e12.4)
+130   format (/' Number of species in the chain : ',i3)
+      end
+
+************************************************************************
+
+      subroutine ObsNodIn(NumNP,NObsD,NObs,lPrint,lChem,Node,NS,lFlux,
+     !                    lAPI,ierr)
+
+      dimension Node(NObsD)
+      logical lPrint,lChem,lFlux,lAPI
+      character*30 Text1,Text2,Text3
 
       read(32,*,err=901) NObs
       if(NObs.gt.NObsD) then
-        ierr=4
+        ierr=3
         return
       end if
       if(NObs.gt.0) then
         read(32,*,err=901) (Node(i),i=1,NObs)
-        do 22 i=1,NObs
+        do 11 i=1,NObs
           Node(i)=NumNP-Node(i)+1
-22      continue
+11      continue
         if(lPrint) then
           NObsA=min(10,NObs)
           Text3='Node('
-          Text1='    h        theta    Temp   '
-          if(lFlux) Text1='    h        theta    Flux   '
+          if(lAPI.and.lChem) then
+            Text1='    Flux         Conc    '
+            write(41,301,err=902) (Text3,NumNP-Node(j)+1,j=1,NObsA)
+            write(41,302,err=902) (Text1,i=1,NObsA)
+          end if
+          Text1='      h        theta    Temp   '
+          if(lFlux) Text1='      h        theta    Flux   '
           Text2='   Conc     '
           if(.not.lChem) then
             write(77,140,err=902) (Text3,NumNP-Node(j)+1,j=1,NObsA)
@@ -452,11 +513,6 @@ c        read(*,*)
 902   ierr=2
       return
 
-110   format (/'Nodal point information'//
-     !'node      x         hOld    MatN LayN  Beta      Ah       AK ',
-     !'     ATh     Temp    Conc(1...NS)         Sorb(1...NS)'/)
-120   format (i4,2f11.3,2i5,f8.3,3f9.3,f8.2,10e12.4,10e12.4)
-130   format (/' Number of species in the chain : ',i3)
 140   format (///16x,10(15x,a5,i3,')', 7x))
 150   format (///16x,10(15x,a5,i3,')',18x))
 160   format (///16x,10(15x,a5,i3,')',29x))
@@ -470,19 +526,19 @@ c        read(*,*)
 264   format (///14x,10(15x,a5,i3,')',117x))
 265   format (///14x,10(15x,a5,i3,')',128x))
 266   format (///14x,10(15x,a5,i3,')',139x))
-200   format (/'         time     ',10(a29,     2x))
-210   format (/'         time     ',10(a29, a12,2x))
-220   format (/'         time     ',10(a29,2a12,2x))
-230   format (/'         time     ',10(a29,3a12,2x))
-240   format (/'         time     ',10(a29,4a12,2x))
-250   format (/'         time     ',10(a29,5a12,2x))
-270   format (/'         time     ',10(a29,6a12,2x))
-271   format (/'       time     ',10(a29,7a12,2x))
-272   format (/'       time     ',10(a29,8a12,2x))
-273   format (/'       time     ',10(a29,9a12,2x))
-274   format (/'       time     ',10(a29,10a12,2x))
-275   format (/'       time     ',10(a29,11a12,2x))
-276   format (/'       time     ',10(a29,12a12,2x))
+200   format (/'         time     ',10(a31,     2x))
+210   format (/'         time     ',10(a31, a12,2x))
+220   format (/'         time     ',10(a31,2a12,2x))
+230   format (/'         time     ',10(a31,3a12,2x))
+240   format (/'         time     ',10(a31,4a12,2x))
+250   format (/'         time     ',10(a31,5a12,2x))
+270   format (/'         time     ',10(a31,6a12,2x))
+271   format (/'       time     ',10(a31,7a12,2x))
+272   format (/'       time     ',10(a31,8a12,2x))
+273   format (/'       time     ',10(a31,9a12,2x))
+274   format (/'       time     ',10(a31,10a12,2x))
+275   format (/'       time     ',10(a31,11a12,2x))
+276   format (/'       time     ',10(a31,12a12,2x))
 301   format (///16x,10(9x,a5,i3,')', 8x))
 302   format (/'         time     ',10(a23,3x))
       end
@@ -556,14 +612,16 @@ c        read(*,*)
       subroutine MatIn(NMat,ParD,ParW,hTab1,hTabN,lScreen,ierr,NumNP,Ah,
      !                 iHyst,AhW,AThW,AKW,MatNum,hNew,Kappa,AThS,ThRR,
      !                 ConR,AKS,KappaO,iModel,xConv,lTable,IKappa,
-     !                 nTabMod,iDualPor)
+     !                 nTabMod,iDualPor,NVarW,iQSame,lAw2Ad,lKSame)
 
       dimension ParD(11,NMat),ParW(11,NMat),Ah(NumNP),AhW(NMat),
      !          AKW(NMat),AThW(NMat),MatNum(NumNP),hNew(NumNP),
      !          Kappa(NumNP),AThS(NumNP),ThRR(NumNP),ConR(NumNP),
-     !          AKS(NumNP),KappaO(NumNP),Ae(100)
-      logical lScreen,lTable
+     !          AKS(NumNP),KappaO(NumNP)
+      logical lScreen,lInverse,lAw2Ad,lKSame,lTable
 
+      lInverse=.false.
+      if(NVarW.gt.0) lInverse=.true.
       if(lScreen) write(*,*) 'reading material information'
       read(30,*,err=901)
       read(30,*,err=901) hTab1,hTabN
@@ -572,7 +630,7 @@ c        read(*,*)
 *     iModel = 0: van Genuchten
 *              1: modified van Genuchten (Vogel and Cislerova)
 *              2: Brooks and Corey
-*              3: van Genuchte with air entry value of 2 cm
+*              3: van Genuchten with air entry value of 2 cm
 *              4: log-normal (Kosugi)
 *              5: dual-porosity function (Durner)
 *              6: dual-porosity system with transfer proportional to water content
@@ -649,7 +707,11 @@ c        read(*,*)
       end if
       do 12 M=1,NMat
         if(iHyst.eq.0) then
-          read(30,*,err=901) (ParD(i,M),i=1,NPar)
+          if(lInverse) then
+            read(30,*,err=901)
+          else
+            read(30,*,err=901) (ParD(i,M),i=1,NPar)
+          end if
           if(iModel.eq.1) then
             ParD(7,M)=amax1(ParD(7,M),ParD(2,M))
             ParD(8,M)=amin1(ParD(8,M),ParD(1,M))
@@ -665,8 +727,43 @@ c        read(*,*)
             write(50,120,err=902) M,(ParD(i,M),i=1,NPar)
           end if
         else  ! Hysteresis
-          read(30,*,err=901) (ParD(i,M),i=1,7),ParW(2,M),ParW(3,M),
-     !                        ParW(5,M)
+          if(lInverse) then
+            read(30,*,err=901)
+            ParW(2,M)=ParD(8,M)
+            ParW(3,M)=ParD(9,M)
+            ParW(5,M)=ParD(10,M)
+            if(iQSame.gt.0) then
+              if(iQSame.eq.2) then
+                ParW(2,M)=ParD(2,M)
+              else
+                ParW(2,M)=amin1(ParD(2,M),ParW(2,M))
+              end if
+              ParD(7,M)=ParD(2,M)
+              ParD(9,M)=ParD(2,M)
+              ParW(7,M)=ParW(2,M)
+              ParW(9,M)=ParW(2,M)
+            else
+              ParW(2,M)=amin1(ParD(2,M),ParW(2,M))
+              ParW(7,M)=amin1(ParD(7,M),ParW(7,M))
+              ParW(9,M)=amin1(ParD(9,M),ParW(9,M))
+            end if
+            if(lAw2Ad) then
+              ParW(3,M)=2.*ParD(3,M)
+            else
+              ParW(3,M)=amax1(ParD(3,M),ParW(3,M))
+            end if
+            if(lKSame) then
+              ParD(10,M)=ParD(5,M)
+              ParW(5,M) =ParD(5,M)
+              ParW(10,M)=ParD(5,M)
+            else
+              ParW(5,M) =amin1(ParW(5,M), ParD(5,M))
+              ParW(10,M)=amin1(ParW(10,M),ParD(10,M))
+            end if
+          else
+            read(30,*,err=901) (ParD(i,M),i=1,7),ParW(2,M),ParW(3,M),
+     !                          ParW(5,M)
+          end if
           ParD(7,M)=amax1(ParD(7,M),ParD(2,M))
           write(50,120,err=902) M,(ParD(i,M),i=1,7),ParW(2,M),
      !                          ParW(3,M),ParW(5,M)
@@ -702,19 +799,35 @@ c        read(*,*)
 
 *     Calculate the air-water interfacial area
       iTab=101
-      Ae(1)=0.
       g=9.81*xConv            ! Gravitational acceleration from [m/s2] to [L/s2]
       Temp=20.
       Sigma=75.6-0.1425*Temp-2.38e-4*Temp**2           ! Surface tension [g/s2]
       row=1.-7.37e-6*(Temp-4.)**2+3.79e-8*(Temp-4.)**3 ! Density of soil water [g/cm3]
       row=row*1.e+06/xConv/xConv/xConv                 ! to [g/L3]
-      M=1
-      write(50,117)
-      do 14 i=2,iTab
-        call qromb(1.,1.-(i-1)*0.01,sInt,iModel,ParD)
-        Ae(i)=sInt*ParD(2,M)*row*g/sigma
-        write(50,122) 1.-(i-1)*0.01,Ae(i)
-14    continue
+
+      do 16 m=1,NMat
+        Ae=0.
+        Se=1.
+        hh=0.
+        write(50,117)
+        write(50,122) Se,ParD(2,m),hh,Ae
+        do 14 i=2,iTab-1   ! Se from 0.99 to 0.01
+          Se=1.-(i-1)*0.01
+          if(Ae.lt.1.e+6) call qromb(1.,Se,sInt,iModel,ParD(1,m))
+          Ae=sInt*ParD(2,M)*row*g/sigma
+          Th=ParD(1,m)+Se*(ParD(2,m)-ParD(1,m))
+          hh=FH(iModel,Th,ParD(1,M))
+          write(50,122) Se,Th,hh,Ae
+14      continue
+        do 15 i=1,10   ! Se from 0.009 to 0.000
+          Se=1.-(iTab-2)*0.01-i*0.001
+          if(Ae.lt.1.e+6) call qromb(1.,Se,sInt,iModel,ParD(1,m))
+          Ae=sInt*ParD(2,M)*row*g/sigma
+          Th=ParD(1,m)+Se*(ParD(2,m)-ParD(1,m))
+          hh=FH(iModel,Th,ParD(1,M))
+          write(50,122) Se,Th,hh,Ae
+15      continue
+16    continue
 
 *     Error when reading from an input file
 901   ierr=1
@@ -741,10 +854,11 @@ c        read(*,*)
 116   format(//'MatNum, Param. array:'//'   Mat     Qr     Qs        ',
      !'Alfa         n          Ks      l      QrIm   QsIm   Alfa2       
      ! n2  Omega'/)
-117   format(//'   Saturation   Air-Water Interfacial Area'/)
-120   format(i5,2x,2f7.3,3e12.3,4f7.3,2e12.3)
+117   format(//'   Saturation       Theta   Pressure Head  Air-Water Are
+     !a'/)
+120   format(i5,2x,2f7.3,4e12.3,3f7.3,2e12.3)
 121   format(i5,2x,2f7.3,3e12.3,2f7.3,3e12.3)
-122   format(2f10.5)
+122   format(2f13.5,2e15.6,f13.5)
       end
 
 ************************************************************************
@@ -760,7 +874,7 @@ c        read(*,*)
      !          Ah(NumNP),AK(NumNP),ParW(11,NMat)
 
       iLengthPath = Len_Trim(cDataPath)
-      cFileName = cDataPath(1:iLengthPath)//'\Hysteresis.in'
+      cFileName = cDataPath(1:iLengthPath)//'/HYSTERESIS.IN'
       open(35,file=cFileName,status='old',err=901)
       read(35,*,err=901) ! Input file "Hyster.in"
       read(35,*,err=901) ! n,Theta,Kappa
@@ -830,6 +944,7 @@ c          if(ConSat(M).lt.ConSMax) ConSMax=ConSat(M)
         else if(iModel.eq.nTabMod) then ! Table
           read(36,*)
           read(36,*) NTab(M)
+          if(NTab(M).gt.NTabD) goto 902
           read(36,*)
           hSat(M)  =0.0
           ConSat(M)=Par(3,M)
@@ -871,6 +986,10 @@ c          if(ConSat(M).lt.ConSMax) ConSMax=ConSat(M)
 901   ierr=1
       return
 
+*     The dimensions in Mater.in are larger than NTabD
+902   ierr=2
+      return
+
 110   format(/7x,'Table of Hydraulic Properties which are interpolated i
      !n simulation'/7x,65('=')/)
 111   format(/7x,'Hydraulic Properties which are interpolated from input 
@@ -887,10 +1006,10 @@ c          if(ConSat(M).lt.ConSMax) ConSMax=ConSat(M)
      !                TPrint,t,dtOpt,TopInF,BotInF,lScreen,ItMin,
      !                ItMax,MaxAL,hCritS,NPD,AtmBC,iVer,lPrintD,nPrStep,
      !                tPrintInt,lEnter,lDayVar,lSinPrec,lLAI,rExtinct,
-     !                aInterc,ierr)
+     !                nCycles,lChem,lYield,CTp,CRp,iInterc,aInterc,ierr)
 
       logical TopInF,BotInF,AtmBC,lPrintD,lEnter,lScreen,lDayVar,lLAI,
-     !        lSinPrec,lBCCycles,lInterc
+     !        lSinPrec,lBCCycles,lChem,lYield,lInterc
       double precision t,tInit,tOld,tMax,tAtm,TPrint,tPrintInt
       dimension TPrint(NPD)
 
@@ -910,32 +1029,59 @@ c          if(ConSat(M).lt.ConSMax) ConSMax=ConSat(M)
       end if
       read(30,*,err=901)
       read(30,*,err=901) (TPrint(i),i=1,MPL)
+      if ((MPL>0).and.(TPrint(1)<=dt)) then ! modified by Adam Szymkiewicz
+        dt = TPrint(1)/2.
+      end if
       dtOpt=dt
       if(TopInF.or.BotInF.or.AtmBC) then
-        iVerA = iGetFileVersion(31,1)
-        read(31,*,err=901)
-        read(31,*,err=901)
-        read(31,*,err=901) MaxAL
-        if(iVerA.eq.4) then
+        nRead=1
+        if(lYield) nRead=2
+        do 12 iRead=1,nRead
+          iVerA = iGetFileVersion(31,1)
           read(31,*,err=901)
-          read(31,*,err=901) lDayVar,lSinPrec,lLAI,lBCCycles,lInterc
-          if(lLAI) then
+          read(31,*,err=901)
+          read(31,*,err=901) MaxAL
+          if(iVerA.ge.4) then
             read(31,*,err=901)
-            read(31,*,err=901) rExtinct
+            read(31,*,err=901) lDayVar,lSinPrec,lLAI,lBCCycles,lInterc
+            if(lInterc) iInterc=1
+            if(lLAI) then
+              read(31,*,err=901)
+              read(31,*,err=901) rExtinct
+            end if
+            if(lBCCycles) then
+              read(31,*,err=901)
+              read(31,*,err=901) nCycles
+              nCycles=max0(1,nCycles)
+            end if
+            if(lInterc) then
+              read(31,*,err=901)
+              read(31,*,err=901) aInterc
+            end if
           end if
-          if(lBCCycles) then
-            read(31,*,err=901)
-            read(31,*,err=901) nCycles
-            nCycles=max0(1,nCycles)
+          read(31,*,err=901) 
+          read(31,*,err=901) hCritS
+          read(31,*,err=901)
+          if(lYield.and.iRead.eq.1) then
+            CTp=0.   ! Cumulative potential transpiration
+            CRp=0.   ! Cumulative potential nutrient demand
+            tPrev=tInit
+            do 11 iAtm=1,MaxAL
+*             reading setup for two solutes, the second being nutrient
+              if(lChem) then
+                read(31,*,err=901) tAtm,Prec,rSoil,rR,hCA,rB,hB,hT,tTop,
+     !                             tBot,Ampl,cT1,cB1,cT2,cB2
+              else
+                read(31,*,err=901) tAtm,Prec,rSoil,rR
+              end if
+              dtAtm=tAtm-tPrev
+              CTp=CTp+dtAtm*rR
+              if(lChem) CRp=CRp+dtAtm*cB2
+              tPrev=tAtm
+11          continue
+            rewind(31)
           end if
-          if(lInterc) then
-            read(31,*,err=901)
-            read(31,*,err=901) aInterc
-          end if
-        end if
-        read(31,*,err=901) 
-        read(31,*,err=901) hCritS
-        read(31,*,err=901)
+12      continue
       else
         tAtm=tMax
       end if
@@ -963,19 +1109,27 @@ c          if(ConSat(M).lt.ConSMax) ConSMax=ConSat(M)
       logical lEnBal,lPrint,lHargr,lMetDaily
       dimension rGrowth(1000,5)
 
-*      Latitude             ! Latitude of the location, [degree, N=+, S=-]
-*      Altitude             ! Altitude of the location above mean see level [m]
-*      ShortWaveRadA=0.25   ! fraction of extraterrestrial readiation on 
-*                           ! overcast days, first Angstrom coefficient, a_s, eq.55
-*      ShortWaveRadB=0.50   ! Input, fraction of extraterrestrial readiation on 
-*                           !   overcast days, second Angstrom coefficient, b_s, eq.55
-*      LAI                  ! Leaf area index [-]
-*      LongWaveRadA=0.90    ! cloudiness factor, a_c, eq. 59
-*      LongWaveRadB=0.10    ! cloudiness factor, b_c, eq. 59
-*      LongWaveRadA1=0.34   ! emissivity correlation coefficient, a_l, eq. 60
-*      LongWaveRadB1=-0.139 ! emissivity correlation coefficient, b_l, eq. 60
-*      WindHeight=200.      ! Measurement hight of wind, [cm]
-*      TempHeight=190.      ! Measurement hight of temperature, [cm]
+*     Latitude             ! Latitude of the location, [degree, N=+, S=-]
+*     Altitude             ! Altitude of the location above mean see level [m]
+*     ShortWaveRadA=0.25   ! fraction of extraterrestrial readiation on 
+*                          ! overcast days, first Angstrom coefficient, a_s, eq.55
+*     ShortWaveRadB=0.50   ! Input, fraction of extraterrestrial readiation on 
+*                          !   overcast days, second Angstrom coefficient, b_s, eq.55
+*     LAI                  ! Leaf area index [-]
+*     LongWaveRadA=0.90    ! cloudiness factor, a_c, eq. 59
+*     LongWaveRadB=0.10    ! cloudiness factor, b_c, eq. 59
+*     LongWaveRadA1=0.34   ! emissivity correlation coefficient, a_l, eq. 60
+*     LongWaveRadB1=-0.139 ! emissivity correlation coefficient, b_l, eq. 60
+*     WindHeight=200.      ! Measurement hight of wind, [cm]
+*     TempHeight=190.      ! Measurement hight of temperature, [cm]
+
+*     lEnBal               ! Calculate energy balance
+*     lHargr               ! Use Hargreaves equation to calculate potential ET
+*     lMetDaily            ! Generate daily variations of meteo variables from daily values
+*     iRadiation           ! =0: Potential radiation; =1: solar radiation; =2: net radiation
+*     iCrop                ! =1: constant; =2: read from a table; =3: read daily growth data
+*     iSunSh               ! =0: Sunshine hours; =1: cloudiness; =2: transmission coefficient
+*     iRelHum	             ! =0: Relative humidity; =1: Vapor pressure
 
       iVerM = iGetFileVersion(33,1)
       read(33,*,err=901)
@@ -1067,21 +1221,21 @@ c          if(ConSat(M).lt.ConSMax) ConSMax=ConSat(M)
      !nsible      Latent     Heat Flux     Balance'/
      !        '      [d]       [MJ/m2/d]    [MJ/m2/d]    [MJ/m2/d]    [M
      !J/m2/d]   [MJ/m2/d]    [MJ/m2/d]    [MJ/m2/d]'/)
-120   format(/'   Time       ET        Evap    Transp     Rns        Rnl
+120   format(/'   Time       ET       EvapP   TranspP     Rns        Rnl
      !    RadTerm  AeroTerm     Prec     Interc   ExInterc'/
      !        '    [d]     [mm/d]    [mm/d]    [mm/d] [MJ/m2/d]  [MJ/m2/
      !d]   [mm/d]    [mm/d]    [mm/d]    [mm/d]    [mm/d]'/)
 130   format(/'     Time      Short.Rad.    Long.Rad.    Radiation    Se
-     !nsible      Latent     Heat Flux     Balance        AirTemp
+     !nsible      Latent     Heat Flux     Balance        AirTemp       
      !AirRH      SolarRad'/
      !        '      [d]       [MJ/m2/d]    [MJ/m2/d]    [MJ/m2/d]    [M
-     !J/m2/d]   [MJ/m2/d]    [MJ/m2/d]    [MJ/m2/d]         [C]
+     !J/m2/d]   [MJ/m2/d]    [MJ/m2/d]    [MJ/m2/d]         [C]         
      ! [%]       [MJ/m2/d]'/)
 140   format(/'   Time       ET        Evap    Transp     Rns        Rnl
-     !    RadTerm  AeroTerm     Prec     Interc   ExInterc   AirTemp
+     !    RadTerm  AeroTerm     Prec     Interc   ExInterc   AirTemp    
      !AirRH   SolarRad'/
      !        '    [d]     [mm/d]    [mm/d]    [mm/d] [MJ/m2/d]  [MJ/m2/
-     !d]   [mm/d]    [mm/d]    [mm/d]    [mm/d]    [mm/d]      [C]
+     !d]   [mm/d]    [mm/d]    [mm/d]    [mm/d]    [mm/d]      [C]      
      ![%]    [MJ/m2/d]'/)
       end
 
@@ -1090,11 +1244,14 @@ c          if(ConSat(M).lt.ConSMax) ConSMax=ConSat(M)
       subroutine SinkIn(NMat,lChem,lMoSink,lSolRed,lSolAdd,P0,POptm,
      !                  P2H,P2L,P3,r2H,r2L,aOsm,c50,P3c,NS,lMsSink,
      !                  cRootMax,iVer,OmegaC,lActRSU,OmegaS,SPot,rKM,
-     !                  cMin,lOmegaW,lScreen,ierr)
+     !                  cMin,lOmegaW,iSolAU,lHanks,lDblVeg,cDataPath,
+     !                  rA,rB,rC,rD,lScreen,ierr)
 
+      character cFileName*260,cDataPath*260
       dimension POptm(NMat),aOsm(NS),cRootMax(NS)
       logical lChem,lMoSink,lSolRed,lSolAdd,lScreen,lMsSink,lActRSU,
-     !        lOmegaW
+     !        lOmegaW,lHanks,lDblVeg
+      common /DoubleVeg/ xP0,xP2H,xP2L,xP3,xr2H,xr2L,xPOptm
 
       if(lScreen) write(*,*) 'reading sink information'
       read(30,*,err=901)
@@ -1118,6 +1275,23 @@ c          if(ConSat(M).lt.ConSMax) ConSMax=ConSat(M)
         P2L=-abs(P2L)
         P2H=-abs(P2H)
         P3 =-abs(P3)
+        if(lDblVeg) then
+          read(35,*,err=903)
+          read(35,*,err=903)
+          read(35,*,err=903) xP0,xP2H,xP2L,xP3,xr2H,xr2L
+          read(35,*,err=903)
+          read(35,*,err=903) xPOptm
+          read(35,*,err=903)
+          read(35,*,err=903)
+          xP0 =-abs(xP0)
+          xP2L=-abs(xP2L)
+          xP2H=-abs(xP2H)
+          xP3 =-abs(xP3)
+          xPOptm=-abs(xPOptm)
+          goto 904
+903       lDblVeg=.false.
+904       continue
+        end if
       else
         read(30,*,err=901) P0,P3
       end if
@@ -1139,14 +1313,25 @@ c          if(ConSat(M).lt.ConSMax) ConSMax=ConSat(M)
             end if
           end if
         end if
-        if(NS.gt.1) lActRSU=.false.    ! disable for uptake on last solute
-        if(lActRSU.and.NS.eq.1) then   ! disable for uptake on last solute
-c        if(lActRSU) then              ! Active uptake only for the last solute
+        if(lActRSU) then              ! Active uptake only for a selected solute
           read(30,*,err=901)
-          read(30,*,err=901) OmegaS,SPot,rKM,cMin,lOmegaW
+          read(30,*,err=901) OmegaS,SPot,rKM,cMin,lOmegaW,iSolAU
+          rA=1.
+          rB=0.
+          rC=0.
+          rD=0.
+c          read(30,*,err=901)               !Naftali
+c          read(30,*,err=901) rA,rB,rC,rD   !Naftali
         end if
       end if
-      
+
+      if(lHanks) then
+        iLengthPath = Len_Trim(cDataPath)
+        cFileName = cDataPath(1:iLengthPath)//'/ROOT_H.OUT'
+        open(62,file=cFileName,status='unknown',err=901)
+        write(62,110)
+110     format(/'         Time       hRoot')
+      end if      
       return
 
 *     Error when reading from an input file
@@ -1165,10 +1350,11 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
       tRPeriod=1.e+30
       if(lScreen) write(*,*) 'reading of root growth information'
       read(30,*,err=901)
-      if(iVer.eq.4) then
+      if(iVer.ge.4) then
         read(30,*,err=901)
-        read(30,*,err=901) iRootIn
-        if(iRootIn.eq.1) then
+        read(30,*,err=901) iRootIn 
+*           =1: Table; =2: Logistic growth; =0: With atmospheric data
+        if(iRootIn.eq.1) then ! Table
           read(30,*,err=901)
           read(30,*,err=901) nGrowth
           if(nGrowth.gt.1000) then
@@ -1183,7 +1369,7 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
 11        continue
         end if
       end if
-      if(iVer.lt.4.or.iRootIn.eq.2) then
+      if(iVer.lt.4.or.iRootIn.eq.2) then  ! Logistic growth
         iRootIn=2
         read(30,*,err=901)
         if(iVer.lt.4) then
@@ -1197,13 +1383,15 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
           xRMed=(xRMax+xRMin)/2.
         end if
         rtm=tRMed-tRMin
-	  if(rtm.lt.1.e-20.or.xRMed.lt.1.e-10) then
+        if(rtm.lt.1.e-20.or.xRMed.lt.1.e-10) then
           write(*,*) 'Time(depth) Root Data must be larger then Initial 
      !Root Growth Time(depth) !!'
           goto 901
         end if
-        RGR=-(1./rtm)*alog(amax1(.0001,(xRMin*(xRMax-xRMed)))/
-     !                                 (xRMed*(xRMax-xRMin)))
+        RGR=0.
+        if(xRMed*(xRMax-xRMin).gt.0.)
+     !    RGR=-(1./rtm)*alog(amax1(.0001,(xRMin*(xRMax-xRMed)))/
+     !                                   (xRMed*(xRMax-xRMin)))
         write(50,110,err=902) tRMin,tRHarv,xRMin,xRMax,RGR
       end if
       return
@@ -1222,18 +1410,111 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
 
 ************************************************************************
 
-      subroutine TempIn(NMat,TPar,Ampl,tPeriod,kTopT,tTop,kBotT,tBot,
-     !                  TopInf,BotInf,iCampbell,iVer,SnowMF,lScreen,
-     !                  ierr)
+*     Reading root distribution information (when lRootIn=true)
 
-      logical TopInf,BotInf,lSnowInput,lScreen
+      subroutine BetaIn(NumNP,Beta,z,cDataPath,lScreen)
+
+      logical lScreen
+      character cFileName*260,cDataPath*260
+      dimension Beta(NumNP),z(NumNP)
+
+      if(lScreen) write(*,*) 'reading of root distribution information'
+
+      iLengthPath = Len_Trim(cDataPath)
+      cFileName = cDataPath(1:iLengthPath)//'/ROOT.IN'
+
+      open(35,file=cFileName,status='old',err=901)
+      read(35,*,err=901) ! Input file "Root.in"
+      read(35,*,err=901) ! iRShape
+      read(35,*,err=901) iRShape  !=0: constant, =1: exponential, 
+                                  !=2: linear,   =3: VG&H,        =4: Vrugt
+      read(35,*,err=901) ! Max rooting depth
+      read(35,*,err=901) rZmax
+      read(35,*,err=901) ! Parameters
+      if     (iRShape.eq.1) then
+        read(35,*,err=901) alpha
+      else if(iRShape.eq.4) then
+        read(35,*,err=901) rZ0,rA
+      end if
+
+      do 11 i=1,NumNP
+        Beta(i)=0.
+11    continue
+      if(rZmax.le.0.) return  ! no root zone
+
+      zSurf=z(NumNP)
+      do 12 i=1,NumNP
+        if(z(i).ge.-rZmax) then
+          if     (iRShape.eq.0) then
+            Beta(i)=1.
+          else if(iRShape.eq.1) then
+            Beta(i)=exp(alpha*z(i))
+          else if(iRShape.eq.2) then
+            Beta(i)=1.+z(i)/rZmax
+          else if(iRShape.eq.3) then
+            if(z(i).lt.zSurf-rZmax) then
+              Beta(i)=0.
+            else if(z(i).lt.zSurf-0.2*rZmax) then
+              Beta(i)=2.08333/rZmax*(1.-(zSurf-z(i))/rZmax)
+            else
+              Beta(i)=1.66667/rZmax
+            end if
+          else if(iRShape.eq.4) then
+            r1=(rZmax-(zSurf-z(i)))/rZmax
+            rRootA=rA
+            if((zSurf-z(i)).gt.rZ0) rRootA=1.
+            r2=rRootA/(rZmax)*abs(rZ0-(zSurf-z(i)))
+            r2=exp(-r2)
+            Betai=amax1(r1*r2,0.)
+            Beta(i)=Beta(i)+Betai
+          end if
+        end if
+12    continue
+
+
+*     Normalize Beta Function
+      SBeta=0.
+      if(Beta(NumNP).gt.0.) SBeta=Beta(NumNP)*(z(NumNP)-z(NumNP-1))/2.
+      do 19 i=2,NumNP-1
+        if(Beta(i).gt.0.) SBeta=SBeta+Beta(i)*(z(i+1)-z(i-1))/2.
+19    continue
+      do 20 i=2,NumNP
+        if(SBeta.gt.0.) then
+          if(Beta(i).gt.0.) Beta(i)=Beta(i)/SBeta
+        else
+          Beta(i)=0.
+        end if
+20    continue
+      return
+
+*     Error when reading from an input file
+901   ierr=1
+      return
+*     Error when writing into an output file
+902   ierr=2
+      return
+      end
+
+************************************************************************
+
+      subroutine TempIn(NMat,TPar,Ampl,tPeriod,kTopT,tTop,kBotT,tBot,
+     !                  TopInf,BotInf,iCampbell,iVer,lSnow,SnowMF,
+     !                  SnowSF,SnowLayer,lScreen,ierr,NVarH)
+
+      logical TopInf,BotInf,lScreen,lInverse,lSnow,lSnowInput
       dimension TPar(10,NMat)
 
+      lInverse=.false.
+      if(NVarH.gt.0) lInverse=.true.
       if(lScreen) write(*,*) 'reading heat transport information'
       read(30,*,err=901)
       read(30,*,err=901)
       do 11 i=1,NMat
-        read(30,*,err=901)  (TPar(j,i),j=1,9)
+        if(lInverse) then
+          read(30,*,err=901)
+        else
+          read(30,*,err=901)  (TPar(j,i),j=1,9)
+        end if
 11    continue
       read(30,*,err=901)
       if(iVer.le.2) then
@@ -1243,9 +1524,9 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
         read(30,*,err=901) Ampl,tPeriod,iCampbell,SnowMF
       else
         read(30,*,err=901) Ampl,tPeriod,iCampbell,SnowMF,lSnowInput
-        if(lSnowInput) then
+        if(lSnow.and.lSnowInput) then
           read(30,*,err=901)
-          read(30,*,err=901)
+          read(30,*,err=901) SnowMF,SnowSF,SnowLayer
         end if
       end if
       write(50,110,err=902) Ampl
@@ -1304,6 +1585,120 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
 
 ************************************************************************
 
+      subroutine IrrigIn(iIrrig,hIrrig,rIrrig,tIrrig,iIrrigTr,nIrreg,
+     !                   ierr)
+
+      dimension tIrrig(4)
+
+c      if(lIrrig) then
+c        iLengthPath = Len_Trim(cDataPath)
+c        cFileName = cDataPath(1:iLengthPath)//'/IRRIG.IN'
+c        open(13,file=cFileName,status='old',err=901)
+c        read(13,*,err=901)
+c        read(13,*,err=901) lIrrig
+      iIrrigTr=1
+      nIrreg=0
+      read(30,*,err=901)
+      read(30,*,err=901) iIrrig,hIrrig,rIrrig,tIrrig(3),tIrrig(4)
+      if(tIrrig(3).gt.0.) iIrrigTr=0
+      write(14,110) iIrrig,hIrrig,rIrrig
+      if(iIrrigTr.eq.0) write(14,120) tIrrig(3)
+      if(iIrrigTr.eq.1) write(14,130)
+      write(14,140) tIrrig(4)
+      return
+
+*     Error when reading from an input file 
+901   ierr=1
+      return
+
+110   format(/' Irrigation Scheduling:'/
+     !        ' ======================'/
+     !        ' Observation node triggering irrigation: ', i12/
+     !        ' Pressure head triggering irrigation [L]:',f12.5/
+     !        ' Irrigation rate [L/T]:                  ',e12.5)
+120   format( ' Duration of irrigation [T]:             ',f12.5)
+130   format( ' Duration of irrigation calculated from transpiration')
+140   format( ' Offset of irrigation [T]:               ',f12.5)
+      end
+
+************************************************************************
+
+*     Input describing additional fumigant application
+*     lAddF - additional fumigant application
+*     tAddF - time of additional fumigant application
+*     zAddFT - top of additional fumigant application
+*     zAddFB - bottom of additional fumigant application
+*     FumMass - mass of applied fumigant
+
+      subroutine FumigIn(cDataPath,lFumig,lAddFum,tAddFum,FumMass,
+     !                   zAddFT,zAddFB,tInit,tPrev,CumChPrev,lPrint,
+     !                   NS,ierr)
+
+      logical lFumig,lAddFum,lPrint
+      double precision tAddFum,tInit
+      character cFileName*260,cDataPath*260
+      dimension CumChPrev(2)
+
+      if(lFumig) then
+        iLengthPath = Len_Trim(cDataPath)
+        cFileName = cDataPath(1:iLengthPath)//'/FUMIGANTS.IN'
+        open(15,file=cFileName,status='old',err=901)
+        read(15,*,err=901)
+        read(15,*,err=901)
+        read(15,*,err=901) lFumig
+        read(15,*,err=901)
+        read(15,*,err=901) lAddFum
+        if(lAddFum) then
+          read(15,*,err=901)
+          read(15,*,err=901) tAddFum,FumMass
+          read(15,*,err=901)
+          read(15,*,err=901) zAddFT,zAddFB
+        end if
+        close(15)
+        if(lPrint) then
+          cFileName = cDataPath(1:iLengthPath)//'/NOD_INF_C1.OUT'
+          open(46,file=cFileName, status='unknown',err=902)
+          cFileName = cDataPath(1:iLengthPath)//'/FUMIGANTS.OUT'
+          open(48,file=cFileName, status='unknown',err=902)
+          if(lAddFum) write(48,110) tAddFum,FumMass,zAddFT,zAddFB
+          tPrev=sngl(tInit)
+          CumChPrev(1)=0.
+          CumChPrev(2)=0.
+          write(48,120) 
+          if(NS.ge.2) then
+            cFileName = cDataPath(1:iLengthPath)//'/NOD_INF_C2.OUT'
+            open(47,file=cFileName, status='unknown',err=902)
+            cFileName = cDataPath(1:iLengthPath)//'/FUMIGANTS2.OUT'
+            open(49,file=cFileName, status='unknown',err=902)
+            write(49,120) 
+          end if
+        end if
+      end if
+      return
+
+*     Error when reading from an input file 
+901   lFumig=.false.
+      return
+*     Error when writing into an output file
+902   ierr=2
+      return
+
+110   format(/' Fumigant Application:'/
+     !        ' ===================='/
+     !        ' Application Time [T]:           ',e12.5/
+     !        ' Application Mass [M/L2]:        ',e12.5/
+     !        ' Top of application zone [L]:    ',f12.4/
+     !        ' Bottom of application zone [L]: ',f12.4/)
+120   format(/' Fumigant Fluxes:'/
+     !        ' ================'/
+     !'      Time       Actual Flux    Cum. Flux  Average flux   ConcG(i
+     !Obs)'/
+     !'       [T]         [M/L2/T]       [M/L2]     [M/L2/T]     [M/La^3
+     !]')
+      end
+
+************************************************************************
+
 *     Read information about solute transport
 
       subroutine ChemIn(lUpW,lTDep,NMat,NS,NSD,MaxItC,ChPar,TDep,kTopCh,
@@ -1311,15 +1706,17 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
      !                  lLinear,lEquil,lArtD,PeCr,lScreen,dSurf,cAtm,
      !                  lTort,lMobIm,lBact,lFiltr,iMoistDep,WDep,NMatD,
      !                  iModel,Par,iVer,lDualNEq,lMassIni,lEqInit,iTort,
-     !                  ierr)
+     !                  ierr,NVarS)
 
-      logical lUpW,lTDep,lLinear(NSD),lEquil,lArtD,lScreen,lTort,
-     !        lMobIm(NMat),lBact,lFiltr,lMoistDep,lDualNEq,lMassIni,
-     !        lEqInit,lVar
+      logical lUpW,lTDep,lLinear(NSD),lEquil,lArtD,lScreen,lInverse,
+     !        lTort,lMobIm(NMat),lBact,lFiltr,lMoistDep,lDualNEq,
+     !        lMassIni,lEqInit,lVar
       dimension ChPar(NSD*16+4,NMat),TDep(NSD*16+4),cTop(NSD),cBot(NSD),
-     !          CumCh(10,NSD),WDep(2+NMatD,NSD*9),Par(11,NMat)
+     !          CumCh(11,NSD),WDep(2+NMatD,NSD*9),Par(11,NMat)
 
       if(lScreen) write(*,*) 'reading solute transport information'
+      lInverse=.false.
+      if(NVarS.gt.0) lInverse=.true.
       
       write(50,110,err=902)
       read(30,*,err=901)
@@ -1333,7 +1730,7 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
         lBact=.false.
         if(iBact.eq.1) lBact=.true.
       end if
-      if(iVer.eq.4) then
+      if(iVer.ge.4) then
         read(30,*,err=901)
         read(30,*,err=901) iNonEqul,lMoistDep,lDualNEq,lMassIni,lEqInit,
      !                     lVar
@@ -1351,7 +1748,11 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
       read(30,*,err=901)
       lEquil=.true.
       do 11 M=1,NMat
-        read(30,*,err=901) (ChPar(j,M),j=1,4)
+        if(lInverse) then
+          read(30,*,err=901)
+        else 
+          read(30,*,err=901) (ChPar(j,M),j=1,4)
+        end if
         write(50,160,err=902) M,(ChPar(j,M),j=1,4)
         if(ChPar(3,M).lt.1..or.ChPar(4,M).gt.0..or.lBact) lEquil=.false.
         lMobIm(M)=.false.
@@ -1362,14 +1763,26 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
         jjj=(jj-1)*16
         write(50,170,err=902) jj
         read(30,*,err=901)
-        read(30,*,err=901) (ChPar(jjj+j,1),j=5,6)
+        if(lInverse) then
+          read(30,*,err=901)
+        else 
+          read(30,*,err=901) (ChPar(jjj+j,1),j=5,6)
+c          Modification to have diffusion coef. different for different materials
+c          Two lines (at the beginning of 12 cycle) need to be commented out.
+c          nm=NMat
+c          read(30,*,err=901)  ((ChPar(jjj+j,M),j=5,6),M=1,nm)
+        end if
         write(50,180,err=902) (ChPar(jjj+j,1),j=5,6)
         read(30,*,err=901)
         lLinear(jj)=.true.
         do 12 M=1,NMat
           ChPar(jjj+5,M)=ChPar(jjj+5,1)
           ChPar(jjj+6,M)=ChPar(jjj+6,1)
-          read(30,*,err=901) (ChPar(jjj+j,M),j=7,20)
+          if(lInverse) then 
+            read(30,*,err=901)
+          else 
+            read(30,*,err=901) (ChPar(jjj+j,M),j=7,20)
+          end if
           write(50,190,err=902) M,(ChPar(jjj+j,M),j=7,20)
           if     (abs(ChPar(jjj+8,M)-0.0).gt.1.e-12) then
             write(50,200,err=902) M
@@ -1392,12 +1805,12 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
 12      continue
 13    continue
       do 14 jj=1,NS*16+4
-       TDep(jj)=0.
-       if(jj.le.NS*9) WDep(1,jj)=1.
-       if(jj.le.NS*9) WDep(2,jj)=0.
+        TDep(jj)=0.
+        if(jj.le.NS*9) WDep(1,jj)=1.
+        if(jj.le.NS*9) WDep(2,jj)=0.
 14    continue
       do 16 jj=1,NS
-        do 15 i=1,10
+        do 15 i=1,11
           CumCh(i,jj)=0.
 15      continue
         if(lTDep) then
@@ -1409,22 +1822,22 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
           read(30,*,err=901) (TDep(jjj+j),j=7,20)
         end if
 16    continue
-      do 19 jj=1,NS
-        if(iMoistDep.eq.1) then
-          if(jj.eq.1) read(30,*,err=901)
-          read(30,*,err=901)
-          read(30,*,err=901) nPar2
+      if(iMoistDep.eq.1) then
+        read(30,*,err=901)
+        read(30,*,err=901)
+        read(30,*,err=901) nPar2
+        do 19 jj=1,NS
           jjj=(jj-1)*9
           read(30,*,err=901)
-          read(30,*,err=901) (WDep(1,jjj+j),j=1,9)
-          read(30,*,err=901) (WDep(2,jjj+j),j=1,9)
+          read(30,*,err=901) (WDep(1,jjj+j),j=1,9)  ! Coeff. B
+          read(30,*,err=901) (WDep(2,jjj+j),j=1,9)  ! References pressure head h_Ref
           do 18 M=1,NMat
             do 17 j=1,9
-              WDep(2+M,jjj+j)=FQ(iModel,WDep(2,jjj+j),Par(1,M))
+              WDep(2+M,jjj+j)=FQ(iModel,WDep(2,jjj+j),Par(1,M)) ! Theta_ref
 17          continue
 18        continue
-        end if
-19    continue
+19      continue
+      end if
 
       read(30,*,err=901)
       read(30,*,err=901) kTopCh,(cTop(jj),jj=1,NS),kBotCh,
@@ -1490,13 +1903,13 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
       do 11 i=1,NS
         if(i.le.9) then
           write(ch1,'(i1)') i
-          cName = '\solutex.out'
+          cName = '/SOLUTEX.OUT'
           cName(8:8) = ch1
           cFileName = cDataPath(1:iLengthPath)//cName
         else
           write(ch1,'(i1)') 1
           write(ch2,'(i1)') i-10
-          cName1 = '\solutexx.out'
+          cName1 = '/SOLUTEXX.OUT'
           cName1(8:8) = ch1
           cName1(9:9) = ch2
           cFileName = cDataPath(1:iLengthPath)//cName1
@@ -1583,28 +1996,42 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
      !                lBact,lVapor,lEnBal,lDayVar,lEnter,lFiltr,TauW,
      !                nPrStep,nTabMod,iDualPor,dtMaxT,lExtrap,lPrintD,
      !                lLAI,rExtinct,lDensity,ExcesInt,lMinstep,lPrint,
-     !                lSnow,SnowMF,SnowLayer,cTemp,iSunSh,iRelHum,xRoot,
-     !                lCentrif,Radius,GWL0L,tPrintInt,iTort,iEnhanc,
-     !                hSeep,lEqInit,lSinPrec,iMoistDep,OmegaC,WTransf,
-     !                lDualNEq,lFlux,iCrop,iRootIn,lMassIni,lMetDaily,
-     !                Sorb2,lActRSU,OmegaS,SPot,lOmegaW,OmegaW,
-     !                lEnd,lVaporOut,lFluxOut,iInterc,aInterc)
+     !                lSnow,SnowMF,SnowSF,SnowLayer,lSolHyst,cTemp,
+     !                iSunSh,iRelHum,xRoot,lCentrif,Radius,lSource,
+     !                iNode,hSink,CumSource,GWL0L,tPrintInt,iTort,
+     !                iEnhanc,hSeep,lEqInit,lSolub,lSinPrec,lIrrig,
+     !                iIrrig,jIrrig,hIrrig,rIrrig,tIrrig,lThAds,
+     !                iMoistDep,Sorb3,OmegaC,WTransf,lDualNEq,lFlux,
+     !                iCrop,iRootIn,lMassIni,lMetDaily,PLevelI,iNOB,
+     !                lSameMat,Sorb2,lActRSU,OmegaS,SPot,lOmegaW,
+     !                OmegaW,lSurfact,lEnd,lVaporOut,lFluxOut,lIsotope,
+     !                lFumig,lHanks,iCycle,nCycles,tCycle,iSolAU,
+     !                lDblVeg,Sink2,lYield,Yield,PTLevel,crWat,crSal,
+     !                iInterc,aInterc,lIsSolPres,lPrHeat,CumHeatFlB,
+     !                CumHeatFlT,iDrKod,SinkDr,WDrain,lSurf,fET,lCond,
+     !                lAPI,lAPI_ET,iInit)
  
-      integer TLevel,ALevel,PLevel,err
+      integer TLevel,ALevel,PLevel,PLevelI,PTLevel,err
       logical lVarBC,lMeteo,lBact,lVapor,lEnBal,lDayVar,lEnter,lFiltr,
      !        lVaporOut,lExtrap,lPrintD,lLAI,lDensity,lMinstep,lPrint,
-     !        lSnow,lCentrif,lEqInit,lSeep,lSinPrec,lDualNEq,lFlux,
-     !        lEnd,lMassIni,lMetDaily,lActRSU,lOmegaW,lFluxOut
-      double precision tPrintInt
-      dimension cRoot(NSD),cCumT(NSD),cCumA(NSD),Sink(NumNPD),NTab(1),
-     !          wc(NumNPD),cTemp(NumNPD),Sorb2(NSD,NumNPD),CumQ(12)
-
+     !        lSnow,lSameMat,lSolHyst,lCentrif,lSource,lEqInit,lSolub,
+     !        lSeep,lSinPrec,lIrrig,lThAds,lOpen,lDualNEq,lAPI,lAPI_ET,
+     !        lFlux,lSurfact,lEnd,lMassIni,lMetDaily,lActRSU,lOmegaW,
+     !        lFluxOut,lIsotope,lFumig,lHanks,lDblVeg,lYield,lIsSolPres,
+     !        lPrHeat,lSurf,lCond
+      double precision tPrintInt,tCycle
+      dimension cRoot(NSD),cCumT(NSD),cCumA(NSD),Sink(NumNPD),
+     !          wc(NumNPD),cTemp(NumNPD),Sorb3(NSD,NumNPD),CumQ(17),
+     !          NTab(1),tIrrig(4),Sorb2(NSD,NumNPD),Sink2(NumNPD),
+     !          SinkDr(NumNPD)
+      common /surfactant/ b1,b2,a1,a2,a3,a4,a5,a6,a7,a8
 
       lPrint  =.true.
-      lMinstep=.true.
-      lVarBC  =.false.
+      lMinstep=.false.
+      lVarBC  =.false. ! Time-variable head/flux BC
       lVaporOut=.true. ! special Nod_inf_v.out file with thermal and isothermal conductivities and fluxes
       lFluxOut=.false. ! special T_Level1.out file with various boundary fluxes
+      lCond=.false.    ! Decrease of conductivity with time
 
       CosAlf=1.
       NTab(1)=100
@@ -1612,6 +2039,8 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
       TLevel=1
       ALevel=1
       PLevel=1
+      PTLevel=1
+      PLevelI=1
       hRoot=0.
       vRoot=0.
       IterW=0
@@ -1621,6 +2050,9 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
       wCumT=0.
       wCumA=0.
       WTransf=0.
+      WDrain=0.
+      iDrKod=1 ! =0: drainage flux through the bottom
+               ! =1; drainage flux through sides
       err=0
       iNOB=1
       xRoot=0.
@@ -1633,12 +2065,15 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
 11    continue
       do 12 i=1,NumNPD
         Sink(i)=0.
+        Sink2(i)=0.
+        SinkDr(i)=0.
         wc(i)=0.
         cTemp(i)=0.
         do 12 jS=1,NSD
           Sorb2(jS,i)=0.
+          Sorb3(jS,i)=0.
 12    continue
-      do 13 i=1,12
+      do 13 i=1,16
         CumQ(i)=0.
 13    continue
 
@@ -1654,6 +2089,7 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
 *     iDualPor- Dual porosity model; 
 *               = 1: transfer proportional to difference in water contents
 *               = 2: transfer proportional to difference in pressure heads
+*     lSameMat- The same solute or heat transport parameters for all layers
 *     lDualNEq- Both physical and chemical nonequilibrium are considered simultaneously, two-site sorption in the mobile zone
 *               (fraction of equilibrium sites in mobile zone - ChPar(13), Rate of kinetic sorption - ChPar(16)
 *     lMeteo  - Meterorological input to calculate ET
@@ -1666,6 +2102,7 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
 *     lMetDaily - Daily variations of meteorological variables are generated from daily average, max, and min data
 *     lSnow   - Snow accumulation at the soil surface
 *     SnowMF  - Amount of snow melted per 1 degree [cm3/cm2/K/d]
+*     SnowSF  - Sublimation constant
 *     SnowLayer- Thickness of the snow layer
 *     iTort   - tortuosity in solute transport, =0 for Millington and =1 for Moldrup
 *     lSeep   - Seepage face initiated by different pressure head
@@ -1678,13 +2115,26 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
 *     lActRSU - Active root solute uptake
 *     OmegaS  - Compensated root solute active uptake
 *     SPot    - Potential root solute uptake
+*     iSolAU  = Solute for which to consider active solute uptake
 *     lOmegaW - Reduction of the potential root solute uptake due to reduction of the root water uptake
+*     lIsotope- Solute transport for isotopes, i.e., they evaporate at the surface; change for Christine Stumpp
+*     lFumig  - Special Options for fumigants
+*     lHanks  - Hanks root water uptake model
+*     lDblVeg - Double vegetation, Axx = Beta2, no dual-porosity, no heat transport
+*     lYield  - Calculate crop yield
+*     Yield   - Yield
+*     crWat   - seasonal reduction of root water uptake due to pressure head stress
+*     crSal   - seasonal reduction of root water uptake due to salinity stress
+*     lIsSolPres - Is solute in the transport domain?
+*     lSurf   - divide potential evapotranspiration into potential evaporation
+*               and transpiration based on the root growth, i.e., fET=rR/rRMax
 
       lBact   =.false.
       lFiltr  =.false.
       lVapor  =.false.
       lEnter  =.true.
       lPrintD =.false.
+      lSameMat=.false.
       lDualNEq=.false.
       lMeteo  =.false.
       lLAI    =.false.
@@ -1699,6 +2149,23 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
       lFlux   =.false.
       lActRSU =.false.
       lOmegaW =.false.
+      lIsotope=.false.
+      lFumig  =.true.   ! if input Fumigants.in does not exist, lFumig=.false.
+      lHanks  =.false.
+      nCycles=1
+      iCycle=1
+      tCycle=0.
+      lDblVeg =.false.
+      lYield=.false.
+      Yield=1.
+      crWat=0.
+      crSal=0.
+      iInterc=0         ! Interception
+      aInterc=0.25      ! Interception [mm]
+      lIsSolPres=.false.
+      lPrHeat=.false.   ! Print heat fluxes
+      CumHeatFlB=0.     ! Cumulative bottom heat flux
+      CumHeatFlT=0.     ! Cumulative surface heat flux
 
       nPrStep =1
       tPrintInt=86400.
@@ -1708,34 +2175,132 @@ c        if(lActRSU) then              ! Active uptake only for the last solute
       iRelHum =0
       iCrop   =0
       SnowMF  =0.45  ! cm
+      SnowSF  =0.4
       iTort   =0
       hSeep   =0.
       iMoistDep =0
       OmegaC  =1.
       OmegaS  =1.
       SPot    =0.
+      iSolAU  =1
       OmegaW  =1.
       ExcesInt=0.
       rExtinct=0.39
       SnowLayer=0.
-      iInterc=0         ! Interception
-      aInterc=0.25      ! Interception [mm]
+      lSurf   =.false.
+      fET     =0.
 
 *     New Options - Not supported by GUI
 *     TauW    - Nonequilibrium water flow [Ross and Smettem, 2001]
 *     lExtrap - Extrapolation of hNew from previous time step
 *     lDensity- Density dependent flow and transport
+*     lSolHyst- Hysteresis in solute parameters for mass transfer term for mobile-immobile model (20 in, and 16 out)
 *     lCentrif- Gravitational acceleration in the cetrifuge.
 *     Radius  - Distance of the sample from the centre of centrifuge
+*     lSource - Internal pressure head sink/source [for Bridget]
+*     hSink   - Pressure at the internal sink/source
 *     iEnhanc - Enhancement factor for vapor flow, =1 OK, =0 no.
+*     lSolub  - limit max concentration in the liquid phase (GamG1), enter initial conc. into Sorb,
+*             - Solid phase concentration is then transfered into Sorb2 and stays there.
+*             - Solubility limit is given in GamG1, Raoult's law is implemented.
+*     lThAds  - Adsorption is a function of water content, implemented only with the equilibrium model
+*     lAPI    - Modification for American Petroleum Institute
+*     lSurfact- effect of surfactant
 
       lExtrap =.true.
       lDensity=.false.
-      lCentrif=.false.
-      Radius=0.
+      lSolHyst=.false.
+      lSolub  =.false.
+      lThAds  =.false.
+      lAPI    =.false.
+      lAPI_ET =.false.
       iRootIn =-1
       TauW    =0.
       iEnhanc=1
+
+*     Irrigation Scheduling
+      lIrrig=.false.
+      iIrrig=1        ! Observation node triggering irrigation
+      hIrrig=-200.    ! Pressure head triggering irrigation [L]
+      jIrrig=0        ! =0: no irrigation
+                      ! =1" irrigation is triggered
+                      ! =2" irrigation is active
+      rIrrig=2.0      ! Irrigation rate [L/T]
+      tIrrig(1)=0.    ! Beginning of irrigation [T]
+      tIrrig(2)=0.    ! End of irrigation [T]
+      tIrrig(3)=0.3   ! Duration of irrigation [T]
+      tIrrig(4)=0.5   ! Offset of irrigation [T]
+
+*     Screen inputs -----------------------------------------------------
+      iScreenInput=0
+
+      lSurfact=.false.
+      if(iInit.eq.0) then
+        a1=1.
+        a2=0.
+        a3=0.
+      	a4=1.
+        a5=1.
+        a6=0.
+        a7=0.
+      	a8=1.
+        b1=0.
+        b2=1.
+        if(lSurfact.and.iScreenInput.eq.0) then
+          inquire(unit=35,opened=lOpen)
+          if(lOpen) then
+            read(35,*)
+            read(35,*)
+            read(35,*) a1,a2,a3,a4
+            read(35,*)
+            read(35,*) a5,a6,a7,a8
+            read(35,*) 
+            read(35,*) b1,b2
+          end if
+        end if
+      end if
+
+      lCentrif=.false.
+      if(iInit.eq.0) then
+        Radius=0.
+        if(lCentrif.and.iScreenInput.eq.1) then
+          write(*,*) "Enter radius:"
+          read(*,*) Radius
+        end if
+      end if
+
+      lSource=.false.   ! needs lExtrap =.false. and iTemp=0
+      CumSource=0.
+      if(iInit.eq.0) then
+        if(lSource) then
+          if(iScreenInput.eq.1) then
+            write(*,*) "Enter Node number:"
+            read(*,*) iNode
+            write(*,*) "Enter Pressure at Sink:"
+            read(*,*) hSink
+          else if(iScreenInput.eq.0) then
+            inquire(unit=35,opened=lOpen)
+            if(lOpen) then
+              read(35,*)
+              read(35,*)
+              read(35,*) iNode,hSink
+              write(*,*) "iNode=",iNode
+              write(*,*) "hSink=",hSink
+            end if
+          end if
+        end if
+      end if
+*     Screen inputs -----------------------------------------------------
+
+      if(iScreenInput.eq.0) then ! Input file "Options.In"
+        inquire(unit=35,opened=lOpen)
+        if(lOpen) then
+c          read(35,*)
+c          read(35,*)
+          if(iInit.eq.0) write(*,140) 
+140       format(/' Information from the Options.in input file')  
+        end if
+      end if
 
       return
       end

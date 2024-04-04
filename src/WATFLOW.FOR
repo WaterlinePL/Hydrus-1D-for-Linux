@@ -5,7 +5,7 @@
      !                   hSat,hTemp,KodTop,KodBot,rTop,rBot,CosAlf,t,dt,
      !                   x,Sink,P,R,S,FreeD,SeepF,qGWLF,Aqh,Bqh,GWL0L,
      !                   hTop,hBot,hCritA,hCritS,WLayer,Iter,ItCum,
-     !                   TopInf,KTOld,KBOld,TolTh,TolH,MaxIt,dtMin,tOld,
+     !                   TopInf,kTOld,kBOld,TolTh,TolH,MaxIt,dtMin,tOld,
      !                   dtOpt,ConvgF,TheTab,ThNew,ThOld,thr,ths,lWTDep,
      !                   TempN,Kappa,KappaO,AThS,ThRR,ConO,ConR,AKS,AhW,
      !                   AThW,AKW,iHyst,iModel,qDrain,zBotDr,BaseGW,
@@ -14,10 +14,12 @@
      !                   tConv,ConLT,ConVT,ConVh,TauW,ThEq,ThVNew,
      !                   ThVOld,nTabMod,iDualPor,ThNewIm,ThOldIm,SinkIm,
      !                   vTop,TempO,iTemp,WTransf,lDensity,Conc,NSD,
-     !                   iEnhanc,lCentrif,Radius,hSeep)
+     !                   iEnhanc,lCentrif,Radius,hSeep,lSource,iNode,
+     !                   hSink,CumSource,lDblVeg,Sink2,iDrKod,SinkDr,
+     !                   WDrain)
 
       logical ConvgF,ItCrit,FreeD,qGWLF,TopInf,WLayer,SeepF,lWTDep,
-     !        qDrain,lTable,lVapor,lDensity,lCentrif
+     !        qDrain,lTable,lVapor,lSource,lDensity,lCentrif,lDblVeg
       double precision P,R,S,PB,RB,SB,PT,RT,ST,rMin,t,tOld
       dimension x(NumNP),hNew(NumNP),hOld(NumNP),hTemp(NumNP),thr(NMat),
      !          MatNum(NumNP),ParD(11,NMat),Sink(NumNP),Con(NumNP),
@@ -30,7 +32,8 @@
      !          AhW(NMat),AThW(NMat),KappaO(NumNP),AKW(NMat),NTab(NMat),
      !          ConLT(NumNP),ConVT(NumNP),ConVh(NumNP),ThEq(NumNP),
      !          ThVNew(NumNP),ThVOld(NumNP),SinkIm(NumNP),TempO(NumNP),
-     !          ThNewIm(NumNP),ThOldIm(NumNP),Conc(NSD,NumNP)
+     !          ThNewIm(NumNP),ThOldIm(NumNP),Conc(NSD,NumNP),
+     !          Sink2(NumNP),SinkDr(NumNP)
 
       rMax=1.e+10
       rMin=1.d-100
@@ -57,7 +60,24 @@
         hTemp(NumNP)=hNew(NumNP)
       end if
 
+*     modification needed for upward infiltration, 
+*     to stop infiltration when the profile is fully saturated
+c      if(KodBot.lt.0.and.rBot.gt.0.) then
+c        lSatur=.true.
+c        do 10 i=1,NumNP
+c          M=MatNum(i)
+c          if(abs(ThNew(i)-ths(M)).gt.0.001) lSatur=.false.
+c10      continue
+c        if(lSatur) rBot=0.
+c      end if
+
 12    continue
+
+      if(lSource) then
+        iSource=1   ! =1: Pressure head nodal source; =0: Flux nodal source
+        if(iSource.eq.1) hNew(NumNP-iNode+1)=hSink
+        if(iSource.eq.0) SourceFl=-hSink
+      end if
 
 *     Generate terms of matrix equation and solve by Gauss elimination
       if(iHyst.ne.3) then
@@ -81,12 +101,15 @@
      !            iPosDr,rKhTop,rKhBot,rKvTop,rKvBot,Entres,WetPer,
      !            zInTF,GeoFac,ThEq,Rate,lVapor,lWTDep,TempN,ConLT,
      !            ConVT,ConVh,ThVNew,ThVOld,iDualPor,SinkIm,lDensity,
-     !            Conc,NSD,lCentrif,Radius)
+     !            Conc,NSD,lCentrif,Radius,lDblVeg,Sink2,iDrKod,SinkDr,
+     !            WDrain,NMat,MatNum,ParD)
+
+      if(lSource) call Source(NumNP,hNew,P,R,S,SourceFl,iNode,iSource)
 
       call Shift (NumNP,KodTop,rTop,rBot,hTop,hBot,hCritA,CosAlf,WLayer,
      !            Con,hNew,x,TopInf,KodBot,SeepF,ThNew,ThOld,Sink,dt,
      !            lVapor,lWTDep,ConLT,TempN,ConVh,ConVT,iDualPor,SinkIm,
-     !            lDensity,Conc,NSD,lCentrif,Radius,hSeep)
+     !            lDensity,Conc,NSD,lCentrif,Radius,hSeep,lDblVeg,Sink2)
       do 13 i=1,NumNP
         hTemp(i)=hNew(i)
 13    continue
@@ -139,8 +162,8 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
             hTemp(i)=hOld(i)
             TempN(i)=TempO(i)
 16        continue
-          KodTop=KTOld
-          KodBot=KBOld
+          KodTop=kTOld
+          KodBot=kBOld
           dt=amax1(dt/3,dtMin)
           dtOpt=dt
           t=tOld+dt
@@ -161,6 +184,8 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
         end if
       end if
 
+      if(lSource.and.iTemp.eq.0) CumSource=CumSource+SourceFl*dt
+
       if(iHyst.eq.3)
      !  call Hyst(NumNP,NMat,ParD,ParW,MatNum,Kappa,hNew,hOld,ThNew,
      !            Con,Cap,0,3)
@@ -177,19 +202,22 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
      !                 Entres,WetPer,zInTF,GeoFac,ThEq,Rate,lVapor,
      !                 lWTDep,Temp,ConLT,ConVT,ConVh,ThVNew,ThVOld,
      !                 iDualPor,SinkIm,lDensity,Conc,NSD,lCentrif,
-     !                 Radius)
+     !                 Radius,lDblVeg,Sink2,iDrKod,SinkDr,WDrain,
+     !                 NMat,MatNum,ParD)
 
       logical WLayer,FreeD,qGWLF,qDrain,lVapor,lWTDep,lDensity,lCentrif,
-     !        lGeom
-      double precision P,R,S,PB,RB,SB,PT,RT,ST,A2,A3,B,F2
+     !        lGeom,lDblVeg
+      double precision P,R,S,PB,RB,SB,PT,RT,ST,A2,A3,B,F2,dxA,dxB,dx
+      double precision Ssi, Sei
       dimension x(N),hOld(N),hNew(N),P(N),R(N),S(N),Con(N),Cap(N),
      !          Sink(N),ThNew(N),ThOld(N),ThEq(N),Temp(N),ConLT(N),
      !          ConVT(N),ConVh(N),ThVNew(N),ThVOld(N),SinkIm(N),
-     !          Conc(NSD,N)
+     !          Conc(NSD,N),Sink2(N),SinkDr(N),MatNum(N),ParD(11,NMat)
 
       lGeom=.false.   ! Arithmetic average (false), geometric average (true)
       fRE=1.
       Grav=CosAlf
+      Ssi = 1.0d-6 ! modified by Adam Szymkiewicz, storage coefficient for saturated conditions
       do 10 i=1,N
         ThNew(i)=ThOld(i)+(ThEq(i)-ThOld(i))*Rate
 10    continue
@@ -208,25 +236,41 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
         B=ConB*Grav*fRE
         fRE=fRo(1,Conc(1,1))
       end if
-      if(lVapor) ConB=ConB+(ConVh(1)+ConVh(2))/2.
+      if(lVapor.and..not.lGeom) ConB=ConB+(ConVh(1)+ConVh(2))/2.
+      if(lVapor.and.     lGeom) ConB=ConB+(ConVh(1)*ConVh(2))**0.5
       S(1)=-ConB/dxB
       if(FreeD) rBot=-ConB*Grav*fRE
-      F2=Cap(1)*dx/dt*fRE*Rate
-      RB=ConB/dxB+F2
-      SB=-ConB/dxB
-      if(qGWLF) rBot=Fqh(hNew(1)-GWL0L,Aqh,Bqh)
-      if(qDrain) rBot=FqDrain(x(1)+hNew(1),zBotDr,BaseGW,rSpacing,
-     !                        iPosDr,rKhTop,rKhBot,rKvTop,rKvBot,
-     !                        Entres,WetPer,zInTF,GeoFac)
-      PB=B-Sink(1)*dx+F2*hNew(1)-(ThNew(1)-ThOld(1))*dx/dt*fRE+
-     !   rBot
-      if(iDualPor.gt.0) PB=PB-SinkIm(1)*dx
-      if(lVapor.or.lWTDep) then
-        ConTB=0.
-        if(lVapor) ConTB=ConTB+(ConVT(1)+ConVT(2))/2.
-        if(lWTDep) ConTB=ConTB+(ConLT(1)+ConLT(2))/2.
-        PB=PB+ConTB*(Temp(2)-Temp(1))/dxB-(ThVNew(1)-ThVOld(1))*dx/dt
-      end if
+c      if(FreeD) then
+c        RB=ConB/dxB
+c        SB=-RB
+c        PB=0.d0
+cc        if(lCentrif) PB=ConB*Grav-rBot
+c      else
+        F2=Cap(1)*dx/dt*fRE*Rate
+        Sei = ThNew(1)/ParD(2,MatNum(1)) ! Adam S
+        RB=ConB/dxB+F2
+        RB=RB+Ssi*Sei*dx/dt ! ! Adam S
+        SB=-ConB/dxB
+        if(qGWLF) rBot=Fqh(hNew(1)-GWL0L,Aqh,Bqh)
+        if(qDrain) rBot=FqDrain(x(1)+hNew(1),zBotDr,BaseGW,rSpacing,
+     !                          iPosDr,rKhTop,rKhBot,rKvTop,rKvBot,
+     !                          Entres,WetPer,zInTF,GeoFac,N,x,iDrKod,
+     !                          SinkDr,WDrain,Con)
+        PB=B-Sink(1)*dx+F2*hNew(1)-(ThNew(1)-ThOld(1))*dx/dt*fRE+
+     !     rBot
+        PB=PB+Ssi*Sei*dx/dt*hOld(1) ! Adam S
+        if(lDblVeg)                PB=PB-Sink2(1)*dx
+        if(iDualPor.gt.0)          PB=PB-SinkIm(1)*dx
+        if(qDrain.and.iDrKod.eq.1) PB=PB-SinkDr(1)*dx 
+        if(lVapor.or.lWTDep) then
+          ConTB=0.
+          if(lVapor.and..not.lGeom) ConTB=ConTB+(ConVT(1)+ConVT(2))/2.
+          if(lWTDep.and..not.lGeom) ConTB=ConTB+(ConLT(1)+ConLT(2))/2.
+          if(lVapor.and.     lGeom) ConTB=ConTB+(ConVT(1)*ConVT(2))**0.5
+          if(lWTDep.and.     lGeom) ConTB=ConTB+(ConLT(1)*ConLT(2))**0.5
+          PB=PB+ConTB*(Temp(2)-Temp(1))/dxB-(ThVNew(1)-ThVOld(1))*dx/dt
+        end if
+c      end if
       do 11 i=2,N-1
         dxA=x(i)-x(i-1)
         dxB=x(i+1)-x(i)
@@ -244,23 +288,35 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
         end if
         if(lCentrif) B=B+CosAlf*Con(i)*dx
         if(lVapor) then
-          ConA=ConA+(ConVh(i)+ConVh(i-1))/2.
-          ConB=ConB+(ConVh(i)+ConVh(i+1))/2.
+          if(.not.lGeom) ConA=ConA+(ConVh(i)+ConVh(i-1))/2.
+          if(.not.lGeom) ConB=ConB+(ConVh(i)+ConVh(i+1))/2.
+          if(     lGeom) ConA=ConA+(ConVh(i)*ConVh(i-1))**0.5
+          if(     lGeom) ConB=ConB+(ConVh(i)*ConVh(i+1))**0.5
         end if
         A2=ConA/dxA+ConB/dxB
         A3=-ConB/dxB
         F2=Cap(i)*dx/dt*fRE*Rate
         R(i)=A2+F2
+        Sei = ThNew(i)/ParD(2,MatNum(i)) ! Adam S
+        !Sei = Sei/(ParD(2,MatNum(i))-ParD(1,MatNum(i))) ! Adam S
+        R(i)=R(i)+Ssi*Sei*dx/dt ! ! Adam S
         P(i)=F2*hNew(i)-(ThNew(i)-ThOld(i))*dx/dt*fRE-B-Sink(i)*dx
-        if(iDualPor.gt.0) P(i)=P(i)-SinkIm(i)*dx
+        P(i)=P(i)+Ssi*Sei*dx/dt*hOld(i) ! Adam S
+        if(lDblVeg)                P(i)=P(i)-Sink2(i)*dx
+        if(iDualPor.gt.0)          P(i)=P(i)-SinkIm(i)*dx
+        if(qDrain.and.iDrKod.eq.1) P(i)=P(i)-SinkDr(i)*dx 
         S(i)=A3
         if(lVapor.or.lWTDep) then
           ConTA=0.
-          if(lVapor) ConTA=ConTA+(ConVT(i)+ConVT(i-1))/2.
-          if(lWTDep) ConTA=ConTA+(ConLT(i)+ConLT(i-1))/2.
+          if(lVapor.and..not.lGeom) ConTA=ConTA+(ConVT(i)+ConVT(i-1))/2.
+          if(lWTDep.and..not.lGeom) ConTA=ConTA+(ConLT(i)+ConLT(i-1))/2.
+          if(lVapor.and.   lGeom) ConTA=ConTA+(ConVT(i)*ConVT(i-1))**0.5
+          if(lWTDep.and.   lGeom) ConTA=ConTA+(ConLT(i)*ConLT(i-1))**0.5
           ConTB=0.
-          if(lVapor) ConTB=ConTB+(ConVT(i)+ConVT(i+1))/2.
-          if(lWTDep) ConTB=ConTB+(ConLT(i)+ConLT(i+1))/2.
+          if(lVapor.and..not.lGeom) ConTB=ConTB+(ConVT(i)+ConVT(i+1))/2.
+          if(lWTDep.and..not.lGeom) ConTB=ConTB+(ConLT(i)+ConLT(i+1))/2.
+          if(lVapor.and.   lGeom) ConTB=ConTB+(ConVT(i)+ConVT(i+1))**0.5
+          if(lWTDep.and.   lGeom) ConTB=ConTB+(ConLT(i)+ConLT(i+1))**0.5
           P(i)=P(i)+ConTB*(Temp(i+1)-Temp(i))/dxB-
      !              ConTA*(Temp(i)-Temp(i-1))/dxA-
      !              (ThVNew(i)-ThVOld(i))*dx/dt
@@ -281,9 +337,14 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
       end if
       F2=Cap(N)*dx/dt*fRE*Rate
       RT=ConA/dxA+F2
+      Sei = ThNew(N)/ParD(2,MatNum(N)) ! Adam S
+      RT=RT+Ssi*Sei*dx/dt ! ! Adam S
       ST=-ConA/dxA
       PT=F2*hNew(N)-(ThNew(N)-ThOld(N))*dx/dt*fRE-Sink(N)*dx-B
-      if(iDualPor.gt.0) PT=PT-SinkIm(N)*dx
+      PT=PT+Ssi*Sei*dx/dt*hOld(N) ! Adam S
+      if(lDblVeg)                PT=PT-Sink2(N)*dx
+      if(iDualPor.gt.0)          PT=PT-SinkIm(N)*dx
+      if(qDrain.and.iDrKod.eq.1) PT=PT-SinkDr(N)*dx 
       if(lVapor.or.lWTDep) then
         ConTA=0.
         if(lVapor) ConTA=ConTA+(ConVT(N)+ConVT(N-1))/2.
@@ -360,17 +421,21 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
      !                 WLayer,Con,hNew,x,TopInf,KodBot,SeepF,ThNew,
      !                 ThOld,Sink,dt,lVapor,lWTDep,ConLT,Temp,ConVh,
      !                 ConVT,iDualPor,SinkIm,lDensity,Conc,NSD,lCentrif,
-     !                 Radius,hSeep)
+     !                 Radius,hSeep,lDblVeg,Sink2)
 
       dimension Con(N),hNew(N),x(N),ThNew(N),ThOld(N),Sink(N),ConLT(N),
-     !          Temp(N),ConVh(N),ConVT(N),SinkIm(N),ConC(NSD,N)
-      logical WLayer,TopInf,SeepF,lVapor,lWTDep,lDensity,lCentrif
+     !          Temp(N),ConVh(N),ConVT(N),SinkIm(N),ConC(NSD,N),Sink2(N)
+      logical WLayer,TopInf,SeepF,lVapor,lWTDep,lDensity,lCentrif,
+     !        lSeepLimit,lDblVeg
 
       fRE=1.
       Grav=CosAlf
 
 *     Seepage face at the bottom
       if(SeepF) then
+c        Limiting the flux (vSeep) across the seepage face
+        lSeepLimit=.false.
+        if(lSeepLimit) vSeep=-0.0006
         dx=x(2)-x(1)
         if(lDensity) fRE=fRo(1,Conc(1,1))
         if(lCentrif) Grav=CosAlf*(Radius+abs((x(2)+x(1))/2.))
@@ -381,10 +446,36 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
             KodBot=-2
             rBot=0.
           end if
+          if(lSeepLimit.and.vBot.lt.vSeep) then
+            KodBot=-3
+            rBot=vSeep
+          end if
         else
-          if(hNew(1).ge.hSeep) then
-            KodBot=2
-            hBot=hSeep
+          if(.not.lSeepLimit) then
+            if(hNew(1).ge.hSeep) then
+              KodBot=2
+              hBot=hSeep
+            end if
+          else
+            if(hNew(1).ge.hSeep) then
+              if(KodBot.eq.-2.and.vBot.gt.vSeep) then
+                KodBot=2
+                hBot=hSeep
+              end if
+              if(KodBot.eq.-3.and.vBot.lt.vSeep) then
+                KodBot=-3
+                rBot=vSeep
+              end if
+              if(vBot.lt.vSeep) then
+                KodBot=-3
+                rBot=vSeep
+              end if
+            else
+              if(KodBot.eq.-3) then
+                KodBot=2
+                hBot=hSeep
+              end if
+            end if
           end if
         end if
       end if
@@ -399,6 +490,7 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
           if(lCentrif) Grav=CosAlf*(Radius+abs((x(N)+x(M))/2.))
           vTop=-(Con(N)+Con(M))/2.*((hNew(N)-hNew(M))/dx+Grav*fRE)-
      !           (ThNew(N)-ThOld(N))*fRE*dx/2./dt-Sink(N)*dx/2.
+          if(lDblVeg) vTop=vTop-Sink2(N)*dx/2.
           if(iDualPor.gt.0) vTop=vTop-SinkIm(N)*dx/2.
           if(lWTDep) vTop=vTop-
      !              (ConLT(N)+ConLT(M))/2.*(Temp(N)-Temp(M))/dx
@@ -407,6 +499,7 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
      !             (ConVT(N)+ConVT(M))/2.*(Temp(N)-Temp(M))/dx
           if(abs(vTop).gt.abs(rTop).or.vTop*rTop.le.0.) then 
             if(abs(KodTop).eq.4) KodTop=-4
+c            if(abs(KodTop).eq.1) KodTop=-1
           end if
           if(KodTop.eq.4.and.hNew(N).le.0.99*hCritA.and.rTop.lt.0.)
      !      KodTop=-4
@@ -452,6 +545,7 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
         alh1=alog10(-hTab(1,1))
         dlh =(alog10(-hTab(NTab(1),1))-alh1)/(NTab(1)-1)
       end if
+
       do 11 i=1,NumNP
         AT=1.
         BT=1.
@@ -465,6 +559,7 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
      !        (1.-7.37e-6*(TempR  -4.)**2+3.79e-8*(TempR  -4.)**3)
         end if
         if(lDensity) BT=BT*fRo(1,Conc(1,i))/fRo(2,Conc(1,i))        ! Bulk density/dynamic viscosity
+c        if(Temp(i).le.-1.) BT=1.e-4
         M=MatNum(i)
         if(Kappa(i).eq.-1) then
           hi1=amin1(hSat(M),hTemp(i)/Ah(i)/AT)
@@ -480,6 +575,7 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
           else if(hiM.gt.hTab(NTab(1),1).and.hiM.le.hTab(1,1).and. 
      !                                                      lTable) then
             iT=int((alog10(-hiM)-alh1)/dlh)+1
+            if(iT.ge.NTabD-1) iT=NTabD-1
             dh=(hiM-hTab(iT,1))/(hTab(iT+1,1)-hTab(iT,1))
             Coni=ConTab(iT,M)+(ConTab(iT+1,M)-ConTab(iT,M))*dh
           else
@@ -509,10 +605,13 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
         if(iModel.lt.nTabMod) then         ! Capacity and water content
           if(hiM.ge.hSat(M)) then
             Capi=0.
+            !Capi = 1.0d-5 ! Adam S - alternative implementation of elastic storage
             Thei=ths(M)
+            !Thei=Thei+1.0d-5*hNew(i) ! Adam S
           else if(hiM.ge.hTab(NTab(1),1).and.hiM.le.hTab(1,1).and.
      !                                                      lTable) then
             iT=int((alog10(-hiM)-alh1)/dlh)+1
+            if(iT.ge.NTabD-1) iT=NTabD-1
             dh=(hiM-hTab(iT,1))/(hTab(iT+1,1)-hTab(iT,1))
             Capi=CapTab(iT,M)+(CapTab(iT+1,M)-CapTab(iT,M))*dh
             Thei=TheTab(iT,M)+(TheTab(iT+1,M)-TheTab(iT,M))*dh
@@ -555,6 +654,7 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
           Cap(i)=Capi*ATh(i)*AThS(i)*AThW(M)/Ah(i)/AhW(M)/AT
           theta(i)=ThRR(i)+AThW(M)*ATh(i)*AThS(i)*(Thei-thr(M))
         end if
+c        if(iHyst.eq.1) Con(i)=FKQ(iModel,theta(i),ParD(1,M))*AK(i)*BT
         if(Iter.eq.0) ConO(i)=Con(i)
 11    continue
       if(lVapor.or.lWTDep) then  ! Vapor flow
@@ -577,7 +677,8 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
 ************************************************************************
 
       function FqDrain(GWL,zBotDr,BaseGW,rSpacing,iPosDr,KhTop,KhBot,
-     !                 KvTop,KvBot,Entres,WetPer,zInTF,GeoFac)
+     !                 KvTop,KvBot,Entres,WetPer,zInTF,GeoFac,NumNP,z,
+     !                 iDrKod,SinkDr,WDrain,Con)
 
 *    -------------------------------------------------------------------
 *     Purpose: determines the drainage flux
@@ -629,10 +730,15 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
 *     RRad     radial drainage resistance
 *     x        typical length variable 
 *     ------------------------------------------------------------------  
+*     iDrKod   =0: drainage flow through bottom, =1; drainage flow through sides
+*     SinkDr   nodal drainage flux  
+*     WDrain   (=FqDrain) drainage flux (cm/d).........................O
+*     ------------------------------------------------------------------  
 *     global variables
       integer iPosDr
       real GWL,zBotDr,BaseGW,rSpacing,FqDrain,KhTop,KhBot,KvTop,KvBot
       real Entres,WetPer,zInTF,GeoFac
+      dimension z(NumNP),SinkDr(NumNP),Con(NumNP)
 
 *     local variables
       integer i
@@ -641,10 +747,12 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
 
 *     drainage flux calculated according to Hooghoudt or Ernst
       dh=GWL-zBotDr
+c      if(abs(GWL).lt.1.0e-7) dh=dh+Pond
 
 *     contributing layer below drains limited to 1/4 L
-      if(iPosDr.gt.1) then
-        zImp=max(BaseGW,zBotDr-0.25*rSpacing)
+      if((iPosDr.gt.1).and.(iPosDr.lt.5)) then
+c     modified by Adam Szymkiewicz
+          zImp=max(BaseGW,zBotDr-0.25*rSpacing)
         dBot=(zBotDr-zImp)  
         if(dBot.lt.0.0) STOP 'Error - Bocodrb: dBot negative'
       end if
@@ -656,10 +764,21 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
       end if
 
 *     case 1: homogeneous, on top of impervious layer
-      if(iPosDr.eq.1) then
+      if(iPosDr.eq.1) then 
+*     this part modified by Adam Szymkiewicz
 *     calculation of drainage resistance and drainage flux
-        TotRes=rSpacing*rSpacing/(4.*KhTop*abs(dh))+Entres                ! Eq. 8.7
-
+        EqD = zBotDr-z(1) 
+        EqH = GWL-z(1)
+        FqDrain=-4.*KhTop*(EqH*EqH-EqD*EqD)/(rSpacing*rSpacing)
+c        print *, GWL, z(1), z(NumNP), zBotDr, FqDrain
+c        stop
+        
+c        TotRes=rSpacing*rSpacing/(4.*KhTop*abs(dh))+Entres                ! Eq. 8.7
+c        FqDrain=-dh/TotRes
+      else if (iPosDr.eq.6) then
+        EqD = zBotDr-z(1) 
+        EqH = GWL-z(1)
+        FqDrain=-KhTop*(EqH-EqD)
 *     case 2,3: in homogeneous profile or at interface of 2 layers
       else if(iPosDr.eq.2.or.iPosDr.eq.3) then
 *       calculation of equivalent depth
@@ -683,8 +802,10 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
 *       calculation of drainage resistance & drainage flux
         if(iPosDr.eq.2) then
           TotRes=rSpacing*rSpacing/(8.*KhTop*EqD+4*KhTop*abs(dh))+Entres  ! Eq. 8.8
+          FqDrain=-dh/TotRes
         else if(iPosDr.eq.3) then
           TotRes=rSpacing*rSpacing/(8.*KhBot*EqD+4*KhTop*abs(dh))+Entres  ! Eq. 8.14
+          FqDrain=-dh/TotRes
         end if
 
 *     case 4: drain in bottom layer
@@ -694,6 +815,7 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
         RHor=rSpacing*rSpacing/(8.*KhBot*dBot)                            ! Eq. 8.17
         RRad=rSpacing/(pi*sqrt(KhBot*KvBot))*log(dBot/WetPer)             ! Eq. 8.18
         TotRes=RVer+RHor+RRad+Entres                                      ! Eq. 8.15
+        FqDrain=-dh/TotRes
 
 *     case 5: drain in top layer
       else if(iPosDr.eq.5) then
@@ -704,8 +826,41 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
         RRad=rSpacing/(pi*sqrt(KhTop*KvTop))*log((GeoFac*                 ! Eq. 8.21
      !       (zBotDr-zInTF))/WetPer)
         TotRes=RVer+RHor+RRad+Entres                                      ! Eq. 8.15
+        FqDrain=-dh/TotRes
       end if
-      FqDrain=-dh/TotRes                                                  ! Eq. 8.6
+c      FqDrain=-dh/TotRes                                                  ! Eq. 8.6
+
+      WDrain=0.
+      if(iDrKod.eq.1) then
+        Transm=0.
+        do 12 i=1,NumNP-1
+          if(i.eq.1) then
+            Transm=Transm+Con(1)*(z(2)-z(1))/2.
+          else if(z(i+1).ge.GWL.and.z(i).lt.GWL) then
+            Transm=Transm+Con(i)*(GWL-z(i)+(z(i)-z(i-1))/2.)
+          else if(z(i).lt.GWL) then
+            Transm=Transm+Con(i)*(z(i+1)-z(i-1))/2.
+          end if
+12      continue
+        rKa=Con(1)
+        if(GWL-z(1).gt.0.) rKa=Transm/(GWL-z(1))
+        do 11 i=1,NumNP
+          SinkDr(i)=0.
+*         Uniform with depth
+c          if(z(i).lt.GWL) SinkDr(i)=-FqDrain/(GWL-z(1))
+*         proportional to K(z)
+          if(z(i).lt.GWL) SinkDr(i)=-FqDrain/(GWL-z(1))*Con(i)/rKa
+          if(i.ge.2) then
+            WDrain=WDrain+(SinkDr(i-1)+SinkDr(i))/2.*(z(i)-z(i-1))
+            if(SinkDr(i).eq.0..and.SinkDr(i-1).gt.0.) then
+              Delta=WDrain+FqDrain
+              SinkDr(i-1)=SinkDr(i-1)-Delta/(z(i)-z(i-1))
+              WDrain=WDrain-Delta
+            end if
+          end if
+11      continue
+        FqDrain=0.
+      end if
 
       return
       end
@@ -716,13 +871,15 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
 
       subroutine Veloc(N,hNew,Con,x,CosAlf,v,ThNew,ThOld,Sink,dt,lVapor,
      !                 lWTDep,ConLT,ConVT,ConVh,Temp,vV,ThVNew,ThVOld,
-     !                 lDensity,Conc,NSD,lCentrif,Radius)
+     !                 lDensity,Conc,NSD,lCentrif,Radius,SinkDr)
 
-      logical lVapor,lWTDep,lDensity,lCentrif
+      logical lVapor,lWTDep,lDensity,lCentrif,lAmanda
       dimension hNew(N),x(N),Con(N),v(N),ConLT(N),ConVT(N),ConVh(N),
      !          Temp(N),vV(N),Conc(NSD,N),ThNew(N),ThOld(N),Sink(N),
-     !          ThVNew(N),ThVOld(N)
+     !          ThVNew(N),ThVOld(N),SinkDr(N)
+      dimension vLh(1001),vLT(1001),vVh(1001),vVT(1001)
 
+      lAmanda=.false.  ! output of various components of fluxes in observation nodes.
       fRE=1.
       Grav=CosAlf
       M=N-1
@@ -736,6 +893,15 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
       if(lVapor) vV(N)=-(ConVh(N)+ConVh(M))/2.*(hNew(N)-hNew(M))/dxN-
      !                  (ConVT(N)+ConVT(M))/2.*(Temp(N)-Temp(M))/dxN-
      !                  dxN/2.*(ThVNew(N)-ThVOld(N))/dt
+      if(lAmanda) then
+        vLh(N)=-(Con(N)+Con(M))/2.*((hNew(N)-hNew(M))/dxN+Grav*fRE)-
+     !         (ThNew(N)-ThOld(N))*fRE*dxN/2./dt-Sink(N)*dxN/2.
+        if(lWTDep) vLT(N)=-(ConLT(N)+ConLT(M))/2.*(Temp(N)-Temp(M))/dxN
+        if(lVapor) vVh(N)=-(ConVh(N)+ConVh(M))/2.*(hNew(N)-hNew(M))/dxN
+        if(lVapor) vVT(N)=-(ConVT(N)+ConVT(M))/2.*(Temp(N)-Temp(M))/dxN-
+     !                     (ThVNew(N)-ThVOld(N))*dxN/2./dt
+      end if
+
       do 11 i=2,N-1
         dxA=x(i+1)-x(i)
         dxB=x(i)-x(i-1)
@@ -746,30 +912,38 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
         if(lCentrif) Grav=CosAlf*(Radius+abs((x(i)+x(i-1))/2.))
         vB=-(Con(i)+Con(i-1))/2.*((hNew(i)-hNew(i-1))/dxB+fRE*Grav)
         v(i)=(vA*dxB+vB*dxA)/(dxA+dxB)
+        if(lAmanda) vLh(i)=v(i)
         if(lWTDep) then
           vTA=-(ConLT(i)+ConLT(i+1))/2.*(Temp(i+1)-Temp(i))/dxA
           vTB=-(ConLT(i)+ConLT(i-1))/2.*(Temp(i)-Temp(i-1))/dxB
           v(i)=v(i)+(vTA*dxB+vTB*dxA)/(dxA+dxB)
+          if(lAmanda) vLT(i)=(vTA*dxB+vTB*dxA)/(dxA+dxB)
         end if
         vV(i)=0.
         if(lVapor) then
           vVA=-(ConVh(i)+ConVh(i+1))/2.*(hNew(i+1)-hNew(i))/dxA
           vVB=-(ConVh(i)+ConVh(i-1))/2.*(hNew(i)-hNew(i-1))/dxB
-          vVA=vVA-(ConVT(i)+ConVT(i+1))/2.*(Temp(i+1)-Temp(i))/dxA
-          vVB=vVB-(ConVT(i)+ConVT(i-1))/2.*(Temp(i)-Temp(i-1))/dxB
-          vV(i)=(vVA*dxB+vVB*dxA)/(dxA+dxB)
+          if(lAmanda) vVh(i)=(vVA*dxB+vVB*dxA)/(dxA+dxB)
+          vVTA=-(ConVT(i)+ConVT(i+1))/2.*(Temp(i+1)-Temp(i))/dxA
+          vVTB=-(ConVT(i)+ConVT(i-1))/2.*(Temp(i)-Temp(i-1))/dxB
+          vV(i)=(vVA *dxB+vVB *dxA)/(dxA+dxB)+
+     !          (vVTA*dxB+vVTB*dxA)/(dxA+dxB)
+          if(lAmanda) vVT(i)=(vVTA*dxB+vVTB*dxA)/(dxA+dxB)
         end if
 11    continue
+
       dx1=x(2)-x(1)
       if(lDensity) fRE=(fRo(1,Conc(1,2))+fRo(1,Conc(1,1)))/2.
       if(lCentrif) Grav=CosAlf*(Radius+abs((x(2)+x(1))/2.))
       v(1)=-(Con(1)+Con(2))/2.*((hNew(2)-hNew(1))/dx1+fRE*Grav)+
-     !      dx1/2.*(fRE*(ThNew(1)-ThOld(1))/dt+Sink(1))
+     !      dx1/2.*(fRE*(ThNew(1)-ThOld(1))/dt+Sink(1)+SinkDr(1))
       if(lWTDep) v(1)=v(1)-(ConLT(1)+ConLT(2))/2.*(Temp(2)-Temp(1))/dx1
       vV(1)=0.
       if(lVapor) vV(1)=   -(ConVh(1)+ConVh(2))/2.*(hNew(2)-hNew(1))/dx1-
      !                     (ConVT(1)+ConVT(2))/2.*(Temp(2)-Temp(1))/dx1+
      !                      dx1/2.*(ThVNew(1)-ThVOld(1))/dt
+102   format(f14.4,40e12.4)
+
       return
       end
 
@@ -791,6 +965,7 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
 *       Check for reversal
         KappaO(i)=Kappa(i)
         if((ThNew(i)-ThOld(i))*Kappa(i).ge.-TolTh/1.) goto 11
+c        if(Kappa(i).eq.-1) Kappa(i)=-Kappa(i)
         Kappa(i)=-Kappa(i)
         m=MatNum(i)
         Thr =ParD(1,m)
@@ -879,7 +1054,6 @@ c          if(TauW.gt.0) EpsH=abs(hNew(i)-hTemp(i))-abs(0.05*hNew(i))
         h=hNew(i)/xConv                         ! Conversion to m
         ConLh=Con(i)/xConv*tConv                ! Conversion to m/s
         lLimit=.false.
-c        if(hNew(N).lt.0.99*hCritA)
         if(i.ge.N-1.and.hNew(N).lt.0.99*hCritA)
      !    lLimit=.true.
         T=Temp(i)
@@ -893,10 +1067,11 @@ c        if(hNew(N).lt.0.99*hCritA)
 
         if(lVapor) then
           TKelv=T+273.15
-          DiffT=Diff0*(TKelv/273.15)**2
+          DiffT=Diff0*(TKelv/273.15)**2  ! Noburio et al. (1996b), Campbell (1985)
           ThetaA=ThetaS-Theta(i)
           Tau=0.
           if(ThetaA.gt.0.) Tau=ThetaA**(7./3.)/ThetaS**2  ! Millington & Quirk
+c          Tau=0.66                       ! Penman, van Bavel
           Diff=Tau*ThetaA*DiffT
           row=(1.-7.37e-6*(T-4.)**2+3.79e-8*(T-4.)**3)*1000.
           rovs=0.001*exp(31.3716-6014.79/TKelv-0.00792495*Tkelv)/TKelv
@@ -986,6 +1161,7 @@ c          if(lLimit) Hr=0.000001           ! ##runs fast
       TKelv=Temp+273.15
       DiffT=Diff0*(TKelv/273.15)**2
       ThetaA=ths-Theta
+      Tau=0.
       if(ThetaA.gt.0.) Tau=ThetaA**(7./3.)/ths**2         ! Millington & Quirk
       Diff=Tau*ThetaA*DiffT
       row=(1.-7.37e-6*(Temp-4.)**2+3.79e-8*(Temp-4.)**3)*1000.
@@ -1051,6 +1227,7 @@ c          if(lLimit) Hr=0.000001           ! ##runs fast
           CondM=FK(iModel,      h,Par)
           CondF=FK(iModel,hNew(i),Par)
           SinkIm(i)=0.5*(CondM+CondF)*(hNew(i)-h)
+c          SinkIm(i)=ParD(11,M)*(hNew(i)-h)     ! Constant coeff.
           if(i.eq.N.and.abs(hCritA-hNew(N)).lt.-0.001*hCritA.and.
      !                  abs(hCritA-h).lt.-0.01*hCritA) SinkIm(i)=0.
         end if
@@ -1074,14 +1251,92 @@ c          if(lLimit) Hr=0.000001           ! ##runs fast
       return
       end
 
+*************************************************************************
+
+      subroutine Source(NumNP,hNew,P,R,S,SourceFl,iNode,iSource)
+
+      double precision P(NumNP),R(NumNP),S(NumNP)
+      dimension hNew(NumNP)
+
+      i=NumNP-iNode+1
+      if(iSource.eq.1) then
+        SourceFl=P(i)-hNew(i-1)*S(i-1)-hNew(i)*R(i)-hNew(i+1)*S(i)
+        P(i-1)=P(i-1)-hNew(i)*S(i-1)
+        P(i+1)=P(i+1)-hNew(i)*S(i)
+        P(i)=hNew(i)
+        R(i)=1.
+        S(i-1)=0.
+        S(i)=0.
+      else if(iSource.eq.0) then
+        P(i)=P(i)-SourceFl
+      end if
+
+      return
+      end
+
+************************************************************************
+
+      subroutine Surfact(NumNP,NSD,Conc,Theta,Ah,AK)
+
+      dimension Conc(NSD,NumNP),Theta(NumNP),Ah(NumNP),AK(NumNP)
+      common /surfactant/ b1,b2,a1,a2,a3,a4,a5,a6,a7,a8
+
+      small=1.e-20
+      do 11 i=1,NumNP
+        Ah1=1.
+        Ah2=1.
+        if(abs(a4-small).gt.0.) Ah1=(a1+a2/(1.+exp(-(Conc(1,i)-a3)/a4)))
+        if(abs(a8-small).gt.0.) Ah2=(a5+a6/(1.+exp(-(Theta(i) -a7)/a8)))
+        Ah(i)=Ah1*Ah2
+        AK1=1.
+        if(abs(b2-small).gt.0.) AK1=1./(1.-b1*alog(Conc(1,i)/b2+1.))
+        AK(i)=AK1
+11    continue
+
+      return
+      end
+
+************************************************************************
+
+*     Decrease of conductivity with time in M=1
+*     iCond=0: an exponential decrease
+*     iCond=1: a linear decrease
+*     iCond=2: a parabolic decrease
+
+      subroutine Conductivity(NumNP,NMatD,Ak,MatNum,t,iCond,t0,cA,cB,cC,
+     !                        ParD)
+
+      dimension AK(NumNP),MatNum(NumNP),ParD(11,NMatD)
+      double precision t
+
+      do 11 i=1,NumNP
+        M=MatNum(i)
+        if(M.eq.1) then
+          if(iCond.eq.0) then
+            AK(i)=exp(-cA*sngl(t))
+          else if(iCond.eq.1.or.iCond.eq.2) then
+            if(t.lt.t0) then
+              AK(i)=cA
+            else
+              AK(i)=cA+cB*(sngl(t)-t0)
+              if(iCond.eq.2) AK(i)=AK(i)+cC*(sngl(t)-t0)**2
+            end if
+            AK(i)=AK(i)/ParD(5,1)
+          end if
+        end if
+11    continue
+
+      return
+      end
+
 ************************************************************************
 
       subroutine Update(NumNP,lWat,lChem,lTemp,lVapor,iDualPor,lExtrap,
      !                  dt,dtOld,hTemp,hNew,hOld,ThOld,ThNew,vOld,vNew,
      !                  ThVOld,ThVNew,vVOld,vVNew,ThOldIm,ThNewIm,TempO,
-     !                  TempN,rTop,xConv,ConSMax,KodTop,KodBot)
+     !                  TempN,rTop,xConv,ConSMax,KodTop,KodBot,WLayer)
 
-      logical lWat,lChem,lTemp,lVapor,lExtrap,lSat
+      logical lWat,lChem,lTemp,lVapor,lExtrap,lSat,WLayer
       dimension hTemp(NumNP),hNew(NumNP),hOld(NumNP),ThOld(NumNP),
      !          ThNew(NumNP),vOld(NumNP),vNew(NumNP),ThVOld(NumNP),
      !          ThVNew(NumNP),vVOld(NumNP),vVNew(NumNP),ThOldIm(NumNP),
@@ -1115,7 +1370,7 @@ c          if(lLimit) Hr=0.000001           ! ##runs fast
         if(lTemp) TempO(i)=TempN(i)
 12    continue
       if(lWat.and.lSat.and.(KodTop.eq.-1.or.KodTop.eq.4).
-     !                                        and.rTop.ge.-ConSMax) then
+     !                        and.rTop.ge.-ConSMax.and..not.WLayer) then
         if(KodTop.eq.4) KodTop=-4
         hNew (NumNP)=-0.005*xConv      ! 0.5 cm
         hTemp(NumNP)=-0.005*xConv
@@ -1125,4 +1380,313 @@ c          if(lLimit) Hr=0.000001           ! ##runs fast
       return
       end
 
+************************************************************************
+
+*     Adjust the pressure heads in the bottom of the profile 
+*     when the bottom BC changes
+
+      subroutine ModFlowBot(NumNP,hNew,hOld,hTemp,ThNew,ThOld,x,hBot,
+     !                      iModel,MatNum,ParD,NMat,wVolI,Conc,ChPar,
+     !                      NSD,wAdded)
+
+      dimension hNew(NumNP),hOld(NumNP),hTemp(NumNP),x(NumNP),
+     !          ThNew(NumNP),ThOld(NumNP),MatNum(NumNP),ParD(11,NMat),
+     !          Conc(NSD,NumNP),ChPar(NSD*16+4,NMat)
+
+      iSwitch=1
+      iNode=2
+      Grad=(hNew(2)-hNew(1))/(x(2)-x(1)) ! gradient in the saturated zone
+      hOldB=hNew(1)
+      if(hBot.lt.hOldB) then        ! GWT goes down
+        do 11 i=1,NumNP      
+          if(hNew(i).gt.0..and.iSwitch.eq.1) then
+            iNode=i+3      ! In which node is GWL? (+3)
+          else
+            iSwitch=0      ! off when above GW
+          end if
+11      continue
+      end if
+
+      iSwitch=1
+      xMassChange=0.
+      do 12 i=1,NumNP      
+        hN=hBot+(x(i)-x(1))*Grad            ! new nodal pressure head
+        if(hBot.gt.hOldB) then        ! GWT goes up
+          if(hN.gt.hNew(i).and.iSwitch.eq.1) then 
+            continue
+          else
+            iSwitch=0
+          end if
+        else if(hBot.lt.hOldB) then   ! GWT goes down
+          if(hN.gt.0.and.iSwitch.eq.1) then ! Below water table
+            continue
+          else if(i.le.iNode) then          ! Up to a second node above the old GWT
+            if(hN.lt.hNew(iNode)) hN=hNew(iNode)
+c            zSat=(x(1)*grad-hBot)/grad
+c            hN=hNew(iNode)*(x(i)-zSat)/(x(iNode)-zSat)
+          else
+            iSwitch=0
+          end if
+        else
+          iSwitch=0       
+        end if
+
+        if(iSwitch.eq.1) then
+          hNew(i)=hN
+          hOld(i)=hN
+          hTemp(i)=hN
+
+          if(i.eq.1) dx=(x(2)-x(1))/2.
+          if(i.gt.1) dx=(x(i+1)-x(i-1))/2.
+          xMassChange=xMassChange-ThNew(i)*dx        ! Mass adjustment - remove old water
+
+          ThOld(i)=FQ(iModel,hN,ParD(1,MatNum(i)))   ! new nodal water content
+          ro =ChPar(1,MatNum(i))  ! Bulk Density
+          rKd=ChPar(7,MatNum(i))  ! Kd
+          Dilute=(ThNew(i)+ro*rKd)/(ThOld(i)+ro*rKd) ! works only linear sorption
+          Conc(1,i)=Conc(1,i)*Dilute
+
+          ThNew(i)=ThOld(i)
+          xMassChange=xMassChange+ThNew(i)*dx        ! Mass adjustment - add new water
+        end if
+
+12    continue
+      wVolI=wVolI+xMassChange  ! Adjustment for mass balance calculations
+      wAdded=wAdded+xMassChange
+
+      return
+      end
+
 * ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+
+
+************************************************************************
+
+      subroutine ModFlowBot1(NumNP,hNew,hOld,hTemp,ThNew,ThOld,x,hBot,
+     !                       NTab,NTabD,NMat,iModel,hTab,Contab,hSat,
+     !                       Par,MatNum,Con,wVolI,Conc,ChPar,NSD,wAdded)
+
+    ! ******************************************************************
+    ! modified by AdamS, according to the method proposed by Sahila Beegum
+    ! update pressure profile in the unsaturated zone
+    ! so that the initial bottom flux in the new Modflow time step
+    ! matches the average bottom flux from the previous time step
+    ! in order to eliminate spurious flux oscillations
+    ! profile is calculated using the formulation of the average
+    ! internodal conductivity consistent with Hydrus approximation
+    ! ******************************************************************
+
+      dimension ThOld(NumNP),ThNew(NumNP),hOld(NumNP),hTemp(NumNP),
+     !          hNew(NumNP),x(NumNP),Con(NumNP),MatNum(NumNP),
+     !          hTab(NTab),Par(11,NMat),ConTab(NTabD,NMat),hSat(NMat),
+     !          Conc(NSD,NumNP),ChPar(NSD*16+4,NMat)
+      dimension rKNode(1001),qq1(1001),qq2(1001)
+
+      do 11 i=1,NumNP
+        hTemp(i)=hOld(i)
+11    continue
+
+      XMassChange=0.
+    
+      do 12 i=1,NumNP-1
+        dz=x(i+1)-x(i)
+        rKNode(i)=(Con(i)+Con(i+1))/2.
+        qq1(i)=-(Con(i)+Con(i+1))/2.*((hOld(i+1)-hOld(i))/dz+1.)
+12    continue
+      qFlux=qq1(1)
+
+      hTemp(1)=hBot
+      rKNode(1)=Par(5,MatNum(1))
+      if(hTemp(1).lt.0.0) then
+        write(*,*) 'Negative water pressure at the bottom of profile '
+        stop
+      end if
+
+*     Compute steady state profile
+      do 13 i=1,NumNP-1
+        dz=x(i+1)-x(i)
+        call SolvePressure(qFlux,hTemp(i),hC2,rKNode(i),rKK2,
+     !                     MatNum(i),MatNum(i+1),dz,hDry,NTab,
+     !                     NTabD,NMat,iModel,hTab,Contab,hSat,Par)
+        hTemp(i+1)=hC2
+        rKNode(i+1)=rKK2
+        qq2(i)=-(rKNode(i)+rKNode(i+1))/2.*((hTemp(i+1)-hTemp(i))/dz+1.)
+13    continue
+
+*     Update the bottom part of Hydrus profile
+      hOld(1)=hTemp(1)
+      do 14 i=1,NumNP-1
+        hOld(i+1)=hTemp(i+1)
+        rMaxQ=amax1(abs(qq2(i)),abs(qq1(i)))
+        rMinQ=amin1(abs(qq2(i)),abs(qq1(i)))
+        if(abs(qq1(i)-qq2(i)).gt.(1.0d-12+1.0d-3*rMaxQ)) exit
+14    continue
+
+      do 15 i=1,NumNP
+        hOld(i)=hTemp(i)
+        hNew(i)=hOld(i)
+
+        if(i.eq.1) dx=(x(2)-x(1))/2.
+        if(i.gt.1) dx=(x(i+1)-x(i-1))/2.
+        xMassChange=xMassChange-ThNew(i)*dx        ! Mass adjustment - remove old water
+
+        ThOld(i)=FQ(iModel,hNew(i),Par(1,MatNum(i)))
+        ro =ChPar(1,MatNum(i))  ! Bulk Density
+        rKd=ChPar(7,MatNum(i))  ! Kd
+        Dilute=(ThNew(i)+ro*rKd)/(ThOld(i)+ro*rKd) ! works only linear sorption
+        Conc(1,i)=Conc(1,i)*Dilute
+        ThNew(i)=ThOld(i)         !  this is the modified theta
+        xMassChange=xMassChange+ThNew(i)*dx        ! Mass adjustment - add new water
+15    continue
+      wVolI=wVolI+xMassChange  ! Adjustment for mass balance calculations
+      wAdded=wAdded+xMassChange
+ 
+      return
+      end
+
+************************************************************************
+
+      subroutine SolvePressure(q,h1,h2,rK1,rK2,iMat1,iMat2,dz,hDry,NTab,
+     !                         NTabD,NMat,iModel,hTab,Contab,hSat,Par)
+
+      dimension hTab(NTab),Par(11,NMat),ConTab(NTabD,NMat),hSat(NMat)
+
+*     inputs: q,h1,rK1,dz,hDry, iMat1,iMat2
+*     output: h2,rK2
+
+      if(abs(q).lt.1.0d-12) then
+*       very small flux, pressure distribution approximately hydrostatic
+        h2=h1-dz
+        rK2=FKNode(h2,iMat2,NTab,NTabD,NMat,iModel,hTab,Contab,hSat,Par)
+        return
+      end if
+      if(q.gt.0..and.h1.le.hDry) then
+*       evaporation, limit the pressure head at hDry
+        h2=hDry
+        rK2=FKNode(h2,iMat2,NTab,NTabD,NMat,iModel,hTab,Contab,hSat,Par)
+        return
+      end if
+
+*     Brent method of finding root that lies between x1 and x2, 
+*     Numerical recepies (354)
+
+      iCount=0
+*     Upward flux, root interval < (h1-dz)
+      if(q.gt.0.) then
+        hA=h1-2.*dz
+        FA=FNode(q,h1,hA,rK1,rK2,iMat1,iMat2,dz,
+     !           NTab,NTabD,NMat,iModel,hTab,Contab,hSat,Par)
+        hB=h1-0.9*dz
+        FB=FNode(q,h1,hB,rK1,rK2,iMat1,iMat2,dz,
+     !           NTab,NTabD,NMat,iModel,hTab,Contab,hSat,Par)
+        do while(FA*FB.gt.0)
+          hB=hA
+          FB=FA
+          hA=hA-dz
+          if(hA.le.hDry) then
+            h2=hDry
+            rK2=FKNode(h2,iMat2,NTab,NTabD,NMat,iModel,hTab,Contab,hSat,
+     !                 Par)
+            return
+          end if
+          FA=FNode(q,h1,HA,rK1,rK2,iMat1,iMat2,dz,
+     !             NTab,NTabD,NMat,iModel,hTab,Contab,hSat,Par)
+          iCount=iCount+1
+          if(iCount.eq.10000) then
+            stop 'Cannot find root, upward flow'
+          end if
+        end do
+*     Downward flux, root interval > (h1-dz)
+      else
+        hA=h1-1.1*dz
+        FA=FNode(q,h1,hA,rK1,rK2,iMat1,iMat2,dz,
+     !           NTab,NTabD,NMat,iModel,hTab,Contab,hSat,Par)
+        hB=h1
+        FB=FNode(q,h1,hB,rK1,rK2,iMat1,iMat2,dz,
+     !           NTab,NTabD,NMat,iModel,hTab,Contab,hSat,Par)
+        do while(FA*FB.gt.0)
+          hA=hB
+          FA=FB
+          hB=hB+dz
+          FB=FNode(q,h1,hB,rK1,rK2,iMat1,iMat2,dz,
+     !             NTab,NTabD,NMat,iModel,hTab,Contab,hSat,Par)
+          iCount=iCount+1
+          if(iCount.eq.1000) then
+            stop 'Cannot find root, downward flow'
+          end if
+        end do
+      end if
+
+      do
+        hC=(hA*FB-hB*FA)/(FB-FA)
+        FC=FNode(q,h1,hC,rK1,rK2,iMat1,iMat2,dz,
+     !           NTab,NTabD,NMat,iModel,hTab,Contab,hSat,Par)
+        iCount=iCount+1
+        if(iCount.eq.1000) then
+          exit
+c          stop 'Cannot find root, upward flow'
+        end if
+        if((abs(FC/q).lt.1.0d-4).or.(abs(FC)<1.0d-12)) then
+          exit
+        else if(FA*FC.le.0.) then
+          hB=hC
+          FB=FC
+        else
+          hA=hC
+          FA=FC
+        end if
+      end do
+      h2=hC
+
+      return
+      end
+ 
+************************************************************************
+
+*     Calculates the nodal hydraulic conductivity as a function of 
+*     the pressure head
+
+      real function FKNode(hh,M,NTab,NTabD,NMat,iModel,hTab,Contab,hSat,
+     !                     Par)
+
+      dimension hTab(NTab),Par(11,NMat),ConTab(NTabD,NMat),hSat(NMat)
+
+*     Input: hh,M
+
+      alh1=alog10(-hTab(1))
+      dlh=(alog10(-hTab(NTab))-alh1)/(NTab-1)
+      if(hh.ge.hSat(M)) then
+        FKNode=Par(5,M)
+      else if(hh.gt.hTab(NTab).and.hh.le.hTab(1)) then
+        iT=int((alog10(-hh)-alh1)/dlh)+1
+        dh=(hh-hTab(iT))/(hTab(iT+1)-hTab(iT))
+        FKNode=ConTab(iT,M)+(ConTab(iT+1,M)-ConTab(iT,M))*dh
+      else
+        FKNode=FK(iModel,hh,Par)
+      end if
+
+      return
+      end
+
+
+************************************************************************
+
+*     Calculates nodel Darcy's flux
+
+      real function FNode(qq,h1,h2,rK1,rK2,iMat1,iMat2,dz,
+     !                    NTab,NTabD,NMat,iModel,hTab,Contab,hSat,Par)
+
+      dimension hTab(NTab),Par(11,NMat),ConTab(NTabD,NMat),hSat(NMat)
+
+*     inputs: qq,h1,h2,rK1,dz
+*     output: rK2
+
+      rK2=FKNode(h2,iMat2,NTab,NTabD,NMat,iModel,hTab,Contab,hSat,
+     !           Par)
+      rKAver=0.5*(rK1+rK2)
+      FNode=qq+rKAver/dz*(h2-h1+dz)
+
+      return
+      end
+
+************************************************************************

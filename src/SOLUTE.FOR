@@ -12,14 +12,17 @@
      !                  PeCr,q0,q1,dSurf,cAtm,lTort,Sink,cRootMax,sSink,
      !                  cvChR,lMobIm,cvChIm,TLevel,lBact,Sorb2,SorbN2,
      !                  dtMin,dtOpt,lWat,lFiltr,iDualPor,ThOIm,ThNIm,
-     !                  SinkIm,STrans,iTort,xConv,tConv,lVapor,rBot,
-     !                  ierr,iMoistDep,NMatD,DMoist,WDep,iConcType,Beta,
-     !                  lDualNEq,AtmBC,SinkF,lActRSU,OmegaS,OmegaW,SPot,
-     !                  rKM,cMin,lDensity)
+     !                  SinkIm,STrans,lSolHyst,iTort,xConv,tConv,lVapor,
+     !                  rBot,ierr,lSolub,lThAds,thr,iMoistDep,NMatD,
+     !                  DMoist,WDep,iConcType,Sorb3,Beta,lDualNEq,AtmBC,
+     !                  lSink,lActRSU,OmegaS,OmegaW,SPot,iSolAU,rKM,
+     !                  cMin,lDensity,lIsotope,lFumig,hTop,lIsSolPres,
+     !                  rA,rB,rC,rD,qDrain,iDrKod,SinkDr,cvChDr)
 
       logical lUpW,lConv,lLinear(NSD),lEquil,lArtD,lTort,lMobIm(NMat),
-     !        lBact,lWat,lFiltr,lVapor,SinkF,lNEquil,lDualNEq,AtmBC,
-     !        lActRSU,lDensity
+     !        lBact,lWat,lFiltr,lSolHyst,lVapor,lSolub,lThAds,lSink,
+     !        lNEquil,lDualNEq,AtmBC,lActRSU,lDensity,lIsotope,lFumig,
+     !        lExplosives,lRunOff,lIsSolPres,qDrain,lTineke
       double precision B,D,E,F,t
       integer TLevel
       dimension x(N),ChPar(NSD*16+4,NMat),MatNum(N),thO(N),thN(N),vO(N),
@@ -29,8 +32,11 @@
      !          cPrevO(N),cTemp(N),TDep(NSD*16+4),thSat(NMat),sSink(N),
      !          vCorr(N),Sorb(NSD,N),SorbN(N),q0(N),q1(N),Sink(N),
      !          cvChR(NS),cRootMax(NS),cvChIm(NS),Sorb2(NSD,N),SorbN2(N)
-     !         ,ThOIm(N),ThNIm(N),SinkIm(N),STrans(N),Beta(N),
-     !          DMoist(NMatD,NSD,13,6),WDep(2+NMatD,NSD*9)
+     !         ,ThOIm(N),ThNIm(N),SinkIm(N),STrans(N),thr(NMat),
+     !          DMoist(NMatD,NSD,13,6),Sorb3(NSD,N),Beta(N),
+     !          WDep(2+NMatD,NSD*9),SinkDr(N),cvChDr(NSD)
+
+      lRunOff=.false. ! Transfer of solute to surface water layer (if it exists)
 
       alf=1.-epsi
       IterC=1.
@@ -43,24 +49,42 @@
       R=8.314
 *     Sequential first order decay goes into equilibrium phase (lNEquil=.false.) or nonequilbrium phase (lNEquil=.true.) 
       lNEquil=.false.
+      lExplosives=.false. ! Changes for Katerina Dontseva
+      lTineke=.false.     ! Changes for Tineke De Wilde
+      if(lFumig.and.t-tPulse.gt.dtMin) dSurf=0.005*xConv
 
 10    continue
 
 *     Loop on species in the chain
 
+*     Dissolution of the solid phase (NAPL)
+      if(lSolub) call Dissol(N,NSD,NS,NMat,MatNum,TDep,TempN,ChPar,Conc,
+     !                       Sorb2,ThN,ThNIm,iDualPor,thSat,lMobIm,x,dt,
+     !                       cvChIm)
+
       do 18 jS=1,NS
         Iter=0
         jjj=(jS-1)*16
+        if(lExplosives) then
+          ChPar(jjj+15,2)=ChPar(jjj+14,2)
+          ChPar(jjj+15,1)=ChPar(jjj+14,2)
+          ChPar(jjj+14,1)=ChPar(jjj+14,2)
+          ChPar(jjj+12,2)=ChPar(jjj+11,2)
+          ChPar(jjj+12,1)=ChPar(jjj+11,2)
+          ChPar(jjj+11,1)=ChPar(jjj+11,2)
+        end if
         cvTop(jS)=0.
         cvBot(jS)=0.
         cvCh0(jS)=0.
         cvCh1(jS)=0.
         cvChR(jS)=0.
-        cvChIm(jS)=0.
-        if(t-tPulse.gt.dtMin.and..not.AtmBC) then
+        cvChDr(jS)=0.
+        if(.not.lSolub) cvChIm(jS)=0.
+        if(t-tPulse.gt.dtMin.and..not.AtmBC.and..not.lFumig) then
           cTop(jS)=0.
           cBot(jS)=0.
         end if
+        if(t-tPulse.gt.dtMin.and.lExplosives) ChPar(17,1)=0. ! Explosive dissolution ! needs to be removed
         if(kBotCh.lt.0) then
           if(vO(1).ge.0.) cvBot(jS)=alf*cBot(jS)  *vO(1)
           if(vO(1).lt.0.) cvBot(jS)=alf*Conc(jS,1)*vO(1)
@@ -70,6 +94,11 @@
         end if
         if(kTopCh.lt.0..and.TLevel.ne.1) then 
           if(vO(N).lt.0.) cvTop(jS)=alf*cTop(jS)*vO(N)
+          if(vO(N).gt.0.and.lIsotope) cvTop(jS)=alf*Conc(jS,N)*vO(N)
+          if(lRunOff.and.hTop.ge.0.) then ! Ponding
+            rK=0.83 !100.                       ! Mass Transfer Coefficient  
+            cvTop(jS)=cvTop(jS)+alf*ThN(N)*rK*(Conc(jS,N)-cTop(jS))
+          end if
         end if
         if(kTopCh.eq.-2) then
           M=MatNum(N)
@@ -78,9 +107,10 @@
           TT=(TempO(N)+273.15-Tr)/R/(TempO(N)+273.15)/Tr
           Dg   =ChPar(jjj+ 6,M)*exp(TDep(jjj+ 6)*TT)
           Henry=ChPar(jjj+10,M)*exp(TDep(jjj+10)*TT)
-          dSurfT=dSurf*exp(TDep(jjj+9)*TT)
+          dSurfT=dSurf
+          if(lFumig) dSurfT=dSurf*exp(TDep(jjj+9)*TT)
           cvTop(jS)=cvTop(jS)+alf*Dg/dSurfT*Henry*Conc(jS,N)-
-     !              Dg/dSurfT*cAtm
+     !                        alf*Dg/dSurfT*cAtm
         end if
         if(.not.lLinear(jS)) then
           do 11 i=1,N
@@ -91,9 +121,10 @@
         end if
 
 *       Root Solute Uptake
-        if(SinkF) 
-     !    call SetSSnk(jS,NS,N,t,x,Beta,Sink,sSink,NSD,Conc,OmegaW,
-     !                 cRootMax(jS),lActRSU,OmegaS,SPot,rKM,cMin)
+        if(lSink) 
+     !    call SetSSnk(jS,N,t,x,Beta,Sink,sSink,NSD,Conc,OmegaW,
+     !                 cRootMax(jS),lActRSU,OmegaS,SPot,iSolAU,rKM,cMin,
+     !                 TLevel,rA,rB,rC,rD)
 
 *       Iterative loop for a nonlinear adsorption isotherm
 12      Iter=Iter+1
@@ -101,6 +132,17 @@
           do 13 i=1,N
             cTemp(i)=cNew(i)
 13        continue
+        end if
+
+*       Hysteresis for transport in and out of the immobile zone
+        if(lSolHyst) then
+          do 133 i=1,N
+            if(Conc(jS,i).gt.Sorb(jS,i)) then
+              cTemp(i)=1.
+            else
+              cTemp(i)=0.
+            end if
+133       continue
         end if
 
 *       To construct the matrix equation
@@ -114,8 +156,10 @@
      !               Conc,cNew,cPrevO,dt,Pecl,Cour,dtMxC,lLinear,lEquil,
      !               lUpW,lArtD,Iter,wc,vCorr,Sorb,SorbN,epsi,PeCr,q0,
      !               q1,lTort,sSink,lMobIm,lBact,Sorb2,SorbN2,lFiltr,
-     !               iDualPor,ThOIm,ThNIm,SinkIm,iTort,xConv,tConv,
-     !               iMoistDep,NMatD,DMoist,WDep,lNEquil,lDualNEq)
+     !               iDualPor,ThOIm,ThNIm,SinkIm,lSolHyst,cTemp,iTort,
+     !               lSolub,lThAds,thr,xConv,tConv,iMoistDep,NMatD,
+     !               DMoist,WDep,lExplosives,lNEquil,lDualNEq,t,lFumig,
+     !               qDrain,iDrKod,SinkDr,lTineke)
           Peclet=amax1(Peclet,Pecl)
           Courant=amax1(Courant,Cour)
           dtMaxC=amin1(dtMaxC,dtMxC)
@@ -125,10 +169,10 @@
      !                cTop,x,thO,thN,vO,vN,Conc,Disp,Retard,wc,g0,g1,B,
      !                D,E,F,E1,D1,F1,BN,DN,FN,NMat,ChPar,TempO,TempN,
      !                TDep,dSurfT,cAtm,MatNum,lMobIm,iDualPor,lVapor,
-     !                rBot,lBact)
+     !                rBot,lBact,lIsotope,lRunOff,hTop,rK)
           do 14 i=1,N
-            if(Level.eq.1) vO(i)=vO(i)+vCorr(i)
-            if(Level.eq.2) vN(i)=vN(i)+vCorr(i)
+            if(Level.eq.1)      vO(i)=vO(i)+vCorr(i)
+            if(Level.eq.NLevel) vN(i)=vN(i)+vCorr(i)
 14        continue
 
 *         Calculate mass-transfer fluxes at the beginning of the time interval
@@ -136,8 +180,9 @@
      !      call MassTran(jS,NS,NSD,N,MatNum,TempO,lMobIm,lEquil,ChPar,
      !                    TDep,Sorb,Conc,NMat,x,cvCh0,cvCh1,cvChR,
      !                    cvChIm,alf,q0,q1,sSink,lBact,ThO,Sorb2,lFiltr,
-     !                    vO,iDualPor,SinkIm,xConv,tConv,lDualNEq,
-     !                    STrans,lLinear)
+     !                    vO,iDualPor,SinkIm,Sorb3,dt,xConv,tConv,
+     !                    lDualNEq,STrans,lLinear,lFumig,qDrain,iDrKod,
+     !                    SinkDr,cvChDr)
 15      continue
 
 *       Solve matrix equation
@@ -148,6 +193,14 @@
         do 16 i=1,N
           if((NS.gt.1.and.Iter.eq.1).or.lDensity) cPrevO(i)=Conc(jS,i)
           if(lLinear(jS)) then
+*            Hysteresis for kinetic sorption
+c            if(lSolHyst) then
+c              if(Conc(jS,i).gt.sngl(F(i))) then
+c                cTemp(i)=1.
+c              else
+c                cTemp(i)=0.
+c              end if
+c            end if
             Conc(jS,i)=amax1(sngl(F(i)),0.)
             if(Conc(jS,i).lt.1.e-30.and.Conc(jS,i).gt.0.) Conc(jS,i)=0.
           else
@@ -184,21 +237,29 @@ c              ierr=1
         if(.not.lEquil.and.lLinear(jS)) 
      !    call SorbConc(jS,NSD,N,MatNum,TempN,lMobIm,ChPar,TDep,Sorb,
      !                  Conc,dt,NMat,lBact,thN,Sorb2,lFiltr,vN,iDualPor,
-     !                  ThNIm,ThOIm,SinkIm,STrans,iMoistDep,NMatD,
-     !                  DMoist,WDep,xConv,tConv,lDualNEq)
+     !                  ThNIm,ThOIm,SinkIm,STrans,lSolHyst,cTemp,
+     !                  iMoistDep,NMatD,DMoist,WDep,xConv,tConv,
+     !                  lDualNEq)
 
 *       Calculate mass-transfer fluxes at the end of the time interval
         call MassTran(jS,NS,NSD,N,MatNum,TempN,lMobIm,lEquil,ChPar,TDep,
      !                Sorb,Conc,NMat,x,cvCh0,cvCh1,cvChR,cvChIm,epsi,
      !                q0,q1,sSink,lBact,ThN,Sorb2,lFiltr,vN,iDualPor,
-     !                SinkIm,xConv,tConv,lDualNEq,STrans,lLinear)
+     !                SinkIm,Sorb3,dt,xConv,tConv,lDualNEq,STrans,
+     !                lLinear,lFumig,qDrain,iDrKod,SinkDr,cvChDr)
 
 *       Set up mass fluxes
         if(kTopCh.lt.0) then
           if(TLevel.ne.1) then
             if(vN(N).lt.0.) cvTop(jS)=cvTop(jS)+epsi*vN(N)*cTop(jS)
+            if(vN(N).gt.0..and.lIsotope) 
+     !                      cvTop(jS)=cvTop(jS)+epsi*vN(N)*Conc(jS,N)
+            if(lRunOff.and.hTop.ge.0.) ! ponding
+     !        cvTop(jS)=cvTop(jS)+epsi*ThN(N)*rK*(Conc(jS,N)-cTop(jS))
           else
             if(vN(N).lt.0.) cvTop(jS)=cvTop(jS)+     vN(N)*cTop(jS)
+            if(vN(N).lt.0..and.lIsotope) 
+     !                      cvTop(jS)=cvTop(jS)+     vN(N)*Conc(jS,N)
           end if
         else 
           cvTop(jS)=FN-BN*Conc(jS,N-1)-DN*Conc(jS,N)
@@ -209,7 +270,7 @@ c              ierr=1
           Dg   =ChPar(jjj+ 6,M)*exp(TDep(jjj+ 6)*TT)
           Henry=ChPar(jjj+10,M)*exp(TDep(jjj+10)*TT)
           cvTop(jS)=cvTop(jS)+epsi*Dg/dSurfT*Henry*Conc(jS,N)-
-     !              Dg/dSurfT*cAtm
+     !                        epsi*Dg/dSurfT*cAtm
         end if
         if(kBotCh.lt.0) then
           if(vN(1).ge.0.) cvBot(jS)=cvBot(jS)+epsi*cBot(jS)  *vN(1)
@@ -221,6 +282,7 @@ c              ierr=1
           cvBot(jS)=D1*Conc(jS,1)+E1*Conc(jS,2)-F1
         end if
         IterC=max0(IterC,Iter)
+        if(qDrain.and.iDrKod.eq.1) cvBot(jS)=-cvChDr(jS)
         if(abs(cvTop(jS)).lt.rMin) cvTop(jS)=0.
         if(abs(cvBot(jS)).lt.rMin) cvBot(jS)=0.
 18    continue
@@ -229,6 +291,11 @@ c              ierr=1
       if(iConcType.eq.2)
      !  call FluxConc(N,NMat,NSD,x,vN,thN,thSat,ChPar,MatNum,TempN,TDep,
      !                Conc,cNew,lTort,lMobIm,iDualPor,ThNIm,1)
+
+*     Is solute present?
+      call IsSolutePresent(lIsSolPres,NSD,NS,N,Conc)
+      if(.not.lIsSolPres) dtMaxC=1.e+30
+
       return
       end
 
@@ -244,23 +311,27 @@ c              ierr=1
      !                 lLinear,lEquil,lUpW,lArtD,Iter,wc,vCorr,Sorb,
      !                 SorbN,epsi,PeCr,q0,q1,lTort,sSink,lMobIm,lBact,
      !                 Sorb2,SorbN2,lFiltr,iDualPor,ThOIm,ThNIm,SinkIm,
-     !                 iTort,xConv,tConv,iMoistDep,NMatD,DMoist,WDep,
-     !                 lNEquil,lDualNEq)
+     !                 lSolHyst,cTemp,iTort,lSolub,lThAds,thr,xConv,
+     !                 tConv,iMoistDep,NMatD,DMoist,WDep,lExplosives,
+     !                 lNEquil,lDualNEq,t,lFumig,qDrain,iDrKod,SinkDr,
+     !                 lTineke)
 
+      double precision t
       logical lUpW,lLinear(NSD),lEquil,lArtD,lTort,lMobIm(NMat),lBact,
-     !        lFiltr,lNEquil,
-     !        lDualNEq
+     !        lFiltr,lSolHyst,lSolub,lThAds,lAnne,lExplosives,lNEquil,
+     !        lDualNEq,lFumig,qDrain,lTineke
       dimension x(NumNP),Disp(NumNP),vO(NumNP),vN(NumNP),thO(NumNP),
      !          thN(NumNP),thSat(NMat),ChPar(NSD*16+4,NMat),g0(NumNP),
      !          g1(NumNP),MatNum(NumNP),Conc(NSD,NumNP),TempO(NumNP),
      !          TempN(NumNP),TDep(NSD*16+4),cNew(NumNP),cPrevO(NumNP),
      !          Retard(NumNP),wc(NumNP),Sorb(NSD,NumNP),SorbN(NumNP),
      !          vCorr(NumNP),q0(NumNP),q1(NumNP),
-     !          sSink(NumNP),Sorb2(NSD,NumNP),SorbN2(NumNP),
-     !          ThOIm(NumNP),ThNIm(NumNP),SinkIm(NumNP),
-     !          DMoist(NMatD,NSD,13,6),WDep(2+NMatD,NSD*9)
+     !          sSink(NumNP),Sorb2(NSD,NumNP),SorbN2(NumNP),thr(NMat),
+     !          ThOIm(NumNP),ThNIm(NumNP),SinkIm(NumNP),cTemp(NumNP),
+     !          DMoist(NMatD,NSD,13,6),WDep(2+NMatD,NSD*9),SinkDr(NumNP)
 
 *     Inicialization
+      lAnne=.false. ! Attachement/detachment model for Anne Wehrhan, sequential degradation in the solid phase
       jjj=(jS-1)*16
       if(jS.gt.1) jj1=jjj-16
       Peclet=0.
@@ -286,6 +357,7 @@ c              ierr=1
           if(iDualPor.gt.0) then
             ThImob=ThNIm(i)
             ThImobO=ThOIm(i)
+c            ThG=amax1(0.,thSat(M)-ThW+thSIm(M)-ThImob)
           end if
           v=vN(i)
           if(i.ne.NumNP) then
@@ -305,6 +377,7 @@ c              ierr=1
           end if
           if(iDualPor.gt.0) then
             ThImob=ThOIm(i)
+c            ThG=amax1(0.,thSat(M)-ThW+thSIm(M)-ThImob)
           end if
           v=vO(i)
           if(i.ne.NumNP) then
@@ -325,7 +398,8 @@ c              ierr=1
         Dg   =ChPar(jjj+ 6,M)*exp(TDep(jjj+ 6)*TT)
         xKs  =ChPar(jjj+ 7,M)*exp(TDep(jjj+ 7)*TT)
         xNu  =ChPar(jjj+ 8,M)*exp(TDep(jjj+ 8)*TT)
-        fExp =ChPar(jjj+ 9,M)
+        fExp =ChPar(jjj+ 9,M)*exp(TDep(jjj+ 9)*TT)
+        if(lFumig) fExp=ChPar(jjj+9,M)
         Henry=ChPar(jjj+10,M)*exp(TDep(jjj+10)*TT)
         if(iMoistDep.gt.0)  
      !    f1=rMD(NMatD,NSD,M,jS,1,DMoist,1,WDep,ThW,iMoistDep)
@@ -358,6 +432,7 @@ c              ierr=1
         if(iMoistDep.gt.0) 
      !    f1=rMD(NMatD,NSD,M,jS,6,DMoist,6,WDep,ThW,iMoistDep)
         GamG1 =ChPar(jjj+16,M)*exp(TDep(jjj+16)*TT)*f1
+        if(lSolub) GamG1=0.
         if(iMoistDep.gt.0) 
      !    f1=rMD(NMatD,NSD,M,jS,7,DMoist,7,WDep,ThW,iMoistDep)
         xMuL  =ChPar(jjj+17,M)*exp(TDep(jjj+17)*TT)*f1
@@ -367,10 +442,37 @@ c              ierr=1
         if(iMoistDep.gt.0) 
      !    f1=rMD(NMatD,NSD,M,jS,9,DMoist,9,WDep,ThW,iMoistDep)
         xMuG  =ChPar(jjj+19,M)*exp(TDep(jjj+19)*TT)*f1
+
+        if(lExplosives) then 
+c          xMuL=amax1(xMuL*exp(-sngl(t)*GamG),xMuG)
+          xMuL=amax1(xMuL*exp(-sngl(t)*GamG),xMuL*xMuG)
+c      write(*,*) i,xmul
+          xMuG=0.
+        end if
+        if(lExplosives.and.Conc(jS,i).ge.GamG1) xMuL=0.
         Omega =ChPar(jjj+20,M)*exp(TDep(jjj+20)*TT)
         f_em=1.
         if(lDualNEq) f_em  =ChPar(jjj+13,M)*exp(TDep(jjj+13)*TT)
         if(lDualNEq) OmegaS=ChPar(jjj+16,M)*exp(TDep(jjj+16)*TT)
+        if(lThAds) then
+          Se=(ThW-thr(M))/(ThSat(M)-thr(M))
+          xKs=xKs*Se/(Se+GamG*(1.-Se))
+        end if
+        if(lTineke) then
+c          if(jS.eq.1) GamL=GamL*Conc(2,i)      ! 0Tineke2
+c          if(jS.eq.2) GamL=GamL*Conc(1,i)
+          if(jS.eq.1) then                      ! 0Tineke3
+            XX=(ro*Frac*ChPar(16+7,M)+ThW)*Conc(2,i)
+            GamL=GamL*XX
+          end if
+          if(jS.eq.2) then
+            GamL=GamL*Conc(1,i)
+            GamS=GamL
+            GamS1=GamL1
+          end if
+        end if
+        if(lSolHyst.and.cTemp(i).eq.1.) 
+     !               Omega=ChPar(jjj+16,M)*exp(TDep(jjj+16)*TT)
         if(lBact) then
           Dg=0. 
           GamG =0.
@@ -385,6 +487,12 @@ c              ierr=1
           xMuS =0.
           xMuG =0.
           Omega=0.
+          if(lAnne) then
+            GamS=0.
+            GamSi=0.
+            GamS1 =ChPar(jjj+12,M)*exp(TDep(jjj+12)*TT)
+            GamS1i=ChPar(jjj+12,M)*exp(TDep(jjj+12)*TT)
+          end if
           SMax2 =ChPar(jjj+15,M)*exp(TDep(jjj+15)*TT)
           rKa2  =ChPar(jjj+16,M)*exp(TDep(jjj+16)*TT)
           rKd2  =ChPar(jjj+17,M)*exp(TDep(jjj+17)*TT)
@@ -428,7 +536,8 @@ c              ierr=1
         if(jS.gt.1) then
           xKsP  =ChPar(jj1+ 7,M)*exp(TDep(jj1+ 7)*TT)
           xNuP  =ChPar(jj1+ 8,M)*exp(TDep(jj1+ 8)*TT)
-          fExpP =ChPar(jj1+ 9,M) !*exp(TDep(jj1+ 9)*TT)
+          fExpP =ChPar(jj1+ 9,M)*exp(TDep(jj1+ 9)*TT)
+          if(lFumig) fExpP=ChPar(jj1+9,M)
           HenryP=ChPar(jj1+10,M)*exp(TDep(jj1+10)*TT)
           f1=1.
           if(iMoistDep.gt.0) 
@@ -446,25 +555,31 @@ c              ierr=1
           if(iMoistDep.gt.0) 
      !      f1=rMD(NMatD,NSD,M,jS-1,6,DMoist,6,WDep,ThW,iMoistDep)
           GamG1P=ChPar(jj1+16,M)*exp(TDep(jj1+16)*TT)*f1
+          if(lSolub) GamG1P=0.
           if(lBact) then
             GamL1P=0.
             GamL1Pi=0.
             GamS1P=0.
             GamS1Pi=0.
             GamG1P=0.
+            if(lAnne) then
+              GamS1P =ChPar(jj1+12,M)*exp(TDep(jj1+12)*TT)
+              GamS1Pi=ChPar(jj1+12,M)*exp(TDep(jj1+12)*TT)
+            end if
           end if
         end if
         if(Level.eq.NLevel) then
           TTO=(TempO(i)+273.15-Tr)/R/(TempO(i)+273.15)/Tr
           xKsO  =ChPar(jjj+ 7,M)*exp(TDep(jjj+ 7)*TTO)
           xNuO  =ChPar(jjj+ 8,M)*exp(TDep(jjj+ 8)*TTO)
-          fExpO =ChPar(jjj+ 9,M)
+          fExpO =ChPar(jjj+ 9,M)*exp(TDep(jjj+ 9)*TTO)
+          if(lFumig) fExpO=ChPar(jjj+9,M)
           HenryO=ChPar(jjj+10,M)*exp(TDep(jjj+10)*TTO)
           f1=1.
-          if(iMoistDep.gt.0) 
+          if(iMoistDep.gt.0)
      !      f1=rMD(NMatD,NSD,M,jS,1,DMoist,1,WDep,ThO(i),iMoistDep)
           GamLO =ChPar(jjj+11,M)*exp(TDep(jjj+11)*TTO)*f1
-          if(iMoistDep.gt.0) 
+          if(iMoistDep.gt.0)
      !      f1=rMD(NMatD,NSD,M,jS,10,DMoist,1,WDep,ThImobO,iMoistDep)
           GamLOi=ChPar(jjj+11,M)*exp(TDep(jjj+11)*TTO)*f1
           if(iMoistDep.gt.0) 
@@ -492,6 +607,14 @@ c              ierr=1
      !      f1=rMD(NMatD,NSD,M,jS,8,DMoist,8,WDep,ThO(i),iMoistDep)
           xMuSO =ChPar(jjj+18,M)*exp(TDep(jjj+18)*TTO)*f1
           OmegaO=ChPar(jjj+20,M)*exp(TDep(jjj+20)*TTO)
+
+          if(lThAds) then
+            SeO=(ThWO-thr(M))/(ThSat(M)-thr(M))
+            GamGO=ChPar(jjj+13,M)*exp(TDep(jjj+13)*TTO)
+            xKsO=xKsO*SeO/(SeO+GamG*(1.-SeO))
+          end if
+          if(lSolHyst.and.cTemp(i).eq.1.) 
+     !               OmegaO=ChPar(jjj+16,M)*exp(TDep(jjj+16)*TTO)
           dKs   =(xKs  -  xKsO)/dt
           dNu   =(xNu  -  xNuO)/dt
           ddExp =(fExp - fExpO)/dt
@@ -505,6 +628,12 @@ c              ierr=1
             xMuSO =0.
             xMuGO =0.
             OmegaO=0.
+            if(lAnne) then
+              GamSO=0.
+              GamSOi=0.
+              GamS1O =ChPar(jjj+12,M)*exp(TDep(jjj+12)*TT)
+              GamS1Oi=ChPar(jjj+12,M)*exp(TDep(jjj+12)*TT)
+            end if
             SMax2O =ChPar(jjj+15,M)*exp(TDep(jjj+15)*TTO)
             rKa2O  =ChPar(jjj+16,M)*exp(TDep(jjj+16)*TTO)
             rKd2O  =ChPar(jjj+17,M)*exp(TDep(jjj+17)*TTO)
@@ -540,12 +669,18 @@ c              ierr=1
           TTN=(TempN(i)+273.15-Tr)/R/(TempN(i)+273.15)/Tr
           xKsN  =ChPar(jjj+ 7,M)*exp(TDep(jjj+ 7)*TTN)
           xNuN  =ChPar(jjj+ 8,M)*exp(TDep(jjj+ 8)*TTN)
-          fExpN =ChPar(jjj+ 9,M) !*exp(TDep(jjj+ 9)*TTN)
+          fExpN =ChPar(jjj+ 9,M)*exp(TDep(jjj+ 9)*TTN)
+          if(lFumig) fExpN=ChPar(jjj+9,M)
           HenryN=ChPar(jjj+10,M)*exp(TDep(jjj+10)*TTN)
           dKs   =(xKsN  -  xKs)/dt
           dNu   =(xNuN  -  xNu)/dt
           ddExp =(fExpN - fExp)/dt
           dHenry=(HenryN-Henry)/dt
+          if(lThAds) then
+            SeN=(ThW-thr(M))/(ThSat(M)-thr(M))
+            GamG=ChPar(jjj+13,M)*exp(TDep(jjj+13)*TTN)
+            xKsN=xKsN*SeO/(SeN+GamG*(1.-SeN))
+          end if
           if(i.ne.1)     TTi=(TempO(k)+273.15-Tr)/R/(TempO(k)+273.15)/Tr
           if(i.ne.NumNP) TTj=(TempO(j)+273.15-Tr)/R/(TempO(j)+273.15)/Tr
         end if
@@ -618,7 +753,8 @@ c              ierr=1
         end if
 
 *       Calculate the retardation factors
-        Retard(i)=(ro*Frac*f_em*xKs*dConc+ThG*Henry)/ThW+1.
+        Retard(i)=1.
+        if(ThW.gt.0.)Retard(i)=(ro*Frac*f_em*xKs*dConc+ThG*Henry)/ThW+1.
 
 *       Calculate the dispersion coefficients
         call Disper(i,M,NMat,NSD,NumNP,dt,lTort,lArtD,lUpW,lMobIm,
@@ -663,22 +799,26 @@ c              ierr=1
               aa=Sorb(jS-1,i)*(ThImob*GamL1Pi+
      !                               (1.-Frac)*ro*GamS1Pi*xKsP*SConcPS)
               if(.not.lNEquil) cG=cG+aa
-	        cG1=cG1+aa    
+              cG1=cG1+aa    
               if(lDualNEq) then
                 aa=GamS1Pi*ro*Sorb2(jS-1,i)
                 if(.not.lNEquil) cG=cG+aa
-	          cG1=cG1+aa
+                cG1=cG1+aa
               end if
             else if(.not.lBact) then
               aa=GamS1Pi*ro*Sorb(jS-1,i)
               if(.not.lNEquil) cG=cG+aa
-	        cG1=cG1+aa
+              cG1=cG1+aa
             else if(lBact) then
-              write(*,*) 'Attachment/dettachment model is implemented 
-     !only for one solute'
-              write(*,*)'Press Enter to continue'
-              read(*,*)
-              stop
+              if(lAnne) then
+                cG=cG+GamS1Pi*ro*(Sorb(jS-1,i)+Sorb2(jS-1,i))
+              else
+                write(*,*) 'Attachment/detachment model is implemented o
+     !nly for one solute'    ! Parameter spaces were taken by attachment/detachment coefficients.
+c                write(*,*)'Press Enter to continue'
+c                read(*,*)
+c                stop
+              end if
             end if
           end if
           g0(i)=g0(i)+cG
@@ -689,6 +829,7 @@ c              ierr=1
 *       Calculate first-order coefficient g1
         g1(i)=-(GamL+GamL1)*ThW-(GamS+GamS1)*ro*Frac*f_em*xKs*SConc-
      !         (GamG+GamG1)*ThG*Henry
+        if(qDrain.and.iDrKod.eq.1) g1(i)=g1(i)-SinkDr(i)
 c        if(Level.eq.NLevel) g1(i)=g1(i)-ThG*dHenry-Henry*(ThWO-ThW)/dt
         if(.not.lEquil) then
           if((lMobIm(M).or.iDualPor.gt.0).and..not.lBact) then ! mobile-immobile model
@@ -735,10 +876,11 @@ c        if(Level.eq.NLevel) g1(i)=g1(i)-ThG*dHenry-Henry*(ThWO-ThW)/dt
           dx=x(NumNP)-x(NumNP-1)
           derK=(Henry-Henryi)/dx
         else
-          dx=(x(j)-x(k))/2.
+          dx=(x(j)-x(k))
           derK=(Henryj-Henryi)/dx
         end if
         vCorr(i)=ThG*Dg*TauG*derK
+c        vCorr(i)=0.
         if(Level.eq.1)      vO(i)=vO(i)-vCorr(i)
         if(Level.eq.NLevel) vN(i)=vN(i)-vCorr(i)
 
@@ -756,9 +898,10 @@ c        if(Level.eq.NLevel) g1(i)=g1(i)-ThG*dHenry-Henry*(ThWO-ThW)/dt
      !                  cBot,cTop,x,thO,thN,vO,vN,Conc,Disp,Retard,wc,
      !                  g0,g1,B,D,E,F,E1,D1,F1,BN,DN,FN,NMat,ChPar,
      !                  TempO,TempN,TDep,dSurf,cAtm,MatNum,lMobIm,
-     !                  iDualPor,lVapor,rBot,lBact)
+     !                  iDualPor,lVapor,rBot,lBact,lIsotope,lRunOff,
+     !                  hTop,rK)
 
-      logical lMobIm(NMat),lVapor,lBact
+      logical lMobIm(NMat),lVapor,lBact,lIsotope,lRunOff
       double precision B,D,E,F
       dimension cBot(NS),cTop(NS),x(N),thO(N),thN(N),vO(N),vN(N),
      !          Conc(NSD,N),Disp(N),Retard(N),wc(N),g0(N),g1(N),B(N),
@@ -879,7 +1022,10 @@ c        if(Level.eq.NLevel) g1(i)=g1(i)-ThG*dHenry-Henry*(ThWO-ThW)/dt
 *       3. type BC
         if(kTopCh.le.0) then
           F(N)=FN
-          if(vO(N).lt.0.) F(N)=F(N)-alf*vO(N)*cTop(jS)
+          if(vO(N).lt.0.)             F(N)=F(N)-alf*vO(N)*cTop(jS)
+          if(vO(N).gt.0.and.lIsotope) F(N)=F(N)-alf*vO(N)*Conc(jS,N)
+          if(lRunOff.and.hTop.ge.0.) ! Ponding
+     !      F(N)=F(N)-alf*ThN(N)*rK*(Conc(jS,N)-cTop(jS))
           if(kTopCh.eq.-2) then
             M=MatNum(N)
             Tr=293.15
@@ -912,7 +1058,12 @@ c        if(Level.eq.NLevel) g1(i)=g1(i)-ThG*dHenry-Henry*(ThWO-ThW)/dt
           B(N)=BN
           D(N)=DN
           F(N)=F(N)+FE
-          if(vN(N).lt.0.) F(N)=F(N)-epsi*vN(N)*cTop(jS)
+          if(vN(N).lt.0.)              F(N)=F(N)-epsi*vN(N)*cTop(jS)
+          if(vN(N).gt.0..and.lIsotope) D(N)=D(N)+epsi*vN(N)
+          if(lRunOff.and.hTop.ge.0.) then ! Ponding
+            F(N)=F(N)+epsi*ThN(N)*rK*cTop(jS)
+            D(N)=D(N)+epsi*ThN(N)*rK
+          end if
           if(kTopCh.eq.-2) then
             M=MatNum(N)
             Tr=293.15
@@ -1006,7 +1157,7 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
             wc(i)=0.
           else if(abs(Pe2).gt.10.) then
             if(vv1.gt.0.) wc(i)=1.
-            if(vv1.lt.0.) wc(i)=-1
+            if(vv1.lt.0.) wc(i)=-1.
           else
             wc(i)=1./TanH(Pe2)-1./Pe2
             wc(i)=amin1( 1.,wc(i))
@@ -1035,7 +1186,7 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
         ThS=thSat(M)
         if(lMobIm(M).and.iDualPor.eq.0.or.lBact) 
      !                                  ThS=max(thSat(M)-ThImob,0.001)
-        if(              iDualPor.gt.0) ThS=    thSat(M)+ThImob
+        if(              iDualPor.gt.0) ThS=    thSat(M) !+ThImob
         if(iTort.eq.0) then
           TauW=ThW**(7./3.)/ThS**2
           TauG=ThG**(7./3.)/ThS**2
@@ -1047,13 +1198,17 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
         TauW=1.
         TauG=1.
       end if
-      Disp(i)=ChPar(2,M)*abs(v)/ThW+Dw*TauW+ThG/ThW*Dg*Henry*TauG
+      Disp(i)=Dw*TauW
+      if(ThW.gt.0.)
+     !  Disp(i)=Disp(i)+ChPar(2,M)*abs(v)/ThW+ThG/ThW*Dg*Henry*TauG
       if(.not.lArtD.and..not.lUpW) then
         fi=0.
         if(cMid.gt.0.)
      !    fi=6.*ThW*ro*xKs*cMid**(fExp-1.)*
      !         (fExp/(1.+xNu*cMid**fExp)**2-1./(1.+xNu*cMid**fExp))
-        DPom=amax1(dt/(6.*ThW*(ThW+ro*Frac*xKs*dSConc+ThG*Henry)+fi),0.)
+        DPom=0.
+        if(abs(6.*ThW*(ThW+ro*Frac*xKs*dSConc+ThG*Henry)+fi).gt.1.e-05)
+     !  DPom=amax1(dt/(6.*ThW*(ThW+ro*Frac*xKs*dSConc+ThG*Henry)+fi),0.)
         if(Level.ne.NLevel) then
           Disp(i)=Disp(i)+v*v*DPom
         else
@@ -1062,8 +1217,8 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
       end if
       if(lArtD) then
         DD=0.
-        if(PeCr.ne.0.and.abs(v).gt.1.e-15) DD=v*v*dt/thW/thW/
-     !       Retard(i)/PeCr
+        if(PeCr.ne.0.and.abs(v).gt.1.e-15.and.ThW.gt.0.)
+     !    DD=v*v*dt/ThW/ThW/Retard(i)/PeCr
         if(DD.gt.Disp(i)) Disp(i)=DD
       end if
 
@@ -1211,13 +1366,14 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
 
       subroutine SorbConc(jS,NSD,N,MatNum,Temp,lMobIm,ChPar,TDep,Sorb,
      !                    Conc,dt,NMat,lBact,ThW,Sorb2,lFiltr,Veloc,
-     !                    iDualPor,ThIm,ThOIm,SinkIm,STrans,iMoistDep,
-     !                    NMatD,DMoist,WDep,xConv,tConv,lDualNEq)
+     !                    iDualPor,ThIm,ThOIm,SinkIm,STrans,lSolHyst,
+     !                    cTemp,iMoistDep,NMatD,DMoist,WDep,xConv,tConv,
+     !                    lDualNEq)
 
-      logical lMobIm(NMat),lBact,lFiltr,lDualNEq
+      logical lMobIm(NMat),lBact,lFiltr,lSolHyst,lDualNEq
       dimension MatNum(N),Temp(N),ChPar(NSD*16+4,NMat),TDep(NSD*16+4),
      !          Conc(NSD,N),Sorb(NSD,N),ThW(N),Sorb2(NSD,N),Veloc(N),
-     !          ThIm(N),ThOIm(N),SinkIm(N),STrans(N),
+     !          ThIm(N),ThOIm(N),SinkIm(N),STrans(N),cTemp(N),
      !          DMoist(NMatD,NSD,13,6),WDep(2+NMatD,NSD*9)
 
       Tr=293.15
@@ -1236,6 +1392,8 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
      !    f1=rMD(NMatD,NSD,M,jS,13,DMoist,5,WDep,ThW(i),iMoistDep)
         GamS1 =ChPar(jjj+15,M)*exp(TDep(jjj+15)*TT)*f1
         Omega =ChPar(jjj+20,M)*exp(TDep(jjj+20)*TT)
+        if(lSolHyst.and.cTemp(i).eq.1.) 
+     !               Omega=ChPar(jjj+16,M)*exp(TDep(jjj+16)*TT)
 
         if((lMobIm(M).or.iDualPor.gt.0).and..not.lBact) then ! mobile-immobile model
           ro    =ChPar(1,     M)*exp(TDep(1)     *TT)
@@ -1319,14 +1477,17 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
       subroutine MassTran(jS,NS,NSD,N,MatNum,Temp,lMobIm,lEquil,ChPar,
      !                    TDep,Sorb,Conc,NMat,x,cvCh0,cvCh1,cvChR,
      !                    cvChIm,epsi,q0,q1,sSink,lBact,theta,Sorb2,
-     !                    lFiltr,Veloc,iDualPor,SinkIm,xConv,tConv,
-     !                    lDualNEq,STrans,lLinear)
+     !                    lFiltr,Veloc,iDualPor,SinkIm,Sorb3,dt,xConv,
+     !                    tConv,lDualNEq,STrans,lLinear,lFumig,qDrain,
+     !                    iDrKod,SinkDr,cvChDr)
 
-      logical lEquil,lMobIm(NMat),lBact,lFiltr,lDualNEq,lLinear(NS)
+      logical lEquil,lMobIm(NMat),lBact,lFiltr,lDualNEq,lLinear(NS),
+     !        lFumig,qDrain,lMyriam
       dimension x(N),ChPar(NSD*16+4,NMat),MatNum(N),Conc(NSD,N),
      !          cvCh0(NS),cvCh1(NS),Temp(N),TDep(NSD*16+4),sSink(N),
      !          Sorb(NSD,N),q0(N),q1(N),cvChR(NS),cvChIm(NS),theta(N),
-     !          Sorb2(NSD,N),Veloc(N),SinkIm(N),STrans(N)
+     !          Sorb2(NSD,N),Veloc(N),SinkIm(N),Sorb3(NSD,N),STrans(N),
+     !          SinkDr(N),cvChDr(NSD)
 
       Tr=293.15
       R=8.314
@@ -1340,6 +1501,9 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
         cvCh0(jS)=cvCh0(jS)+epsi*dx*(q0(i)+q0(j))/2.
         cvCh1(jS)=cvCh1(jS)+epsi*dx*(q1(i)+q1(j))/2.
         cvChR(jS)=cvChR(jS)+epsi*dx*(sSink(i)+sSink(j))/2.
+        if(qDrain.and.iDrKod.eq.1) 
+     !    cvChDr(jS)=cvChDr(jS)+epsi*dx*(SinkDr(i)*Conc(jS,i)+
+     !                                   SinkDr(j)*Conc(jS,j))/2.
         if(.not.lEquil) then
           Mj=MatNum(j)
           TTj=(Temp(j)+273.15-Tr)/R/(Temp(j)+273.15)/Tr
@@ -1374,12 +1538,14 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
               Fraci =ChPar(3,     Mi)*exp(TDep(3)     *TTi)
               xKsi  =ChPar(jjj+ 7,Mi)*exp(TDep(jjj+ 7)*TTi)
               xNui  =ChPar(jjj+ 8,Mi)*exp(TDep(jjj+ 8)*TTi)
-              fExpi =ChPar(jjj+ 9,Mi) !*exp(TDep(jjj+ 9)*TTi)
+              fExpi =ChPar(jjj+ 9,Mi)*exp(TDep(jjj+ 9)*TTi)
+              if(lFumig) fExpi=ChPar(jjj+9,Mi)
               roj   =ChPar(1,     Mj)*exp(TDep(1)     *TTj)
               Fracj =ChPar(3,     Mj)*exp(TDep(3)     *TTj)
               xKsj  =ChPar(jjj+ 7,Mj)*exp(TDep(jjj+ 7)*TTj)
               xNuj  =ChPar(jjj+ 8,Mj)*exp(TDep(jjj+ 8)*TTj)
-              fExpj =ChPar(jjj+ 9,Mj) !*exp(TDep(jjj+ 9)*TTj)
+              fExpj =ChPar(jjj+ 9,Mj)*exp(TDep(jjj+ 9)*TTj)
+              if(lFumig) fExpj=ChPar(jjj+9,Mj)
               f_emi =ChPar(jjj+13,Mi)*exp(TDep(jjj+13)*TTi)
               f_emj =ChPar(jjj+13,Mj)*exp(TDep(jjj+13)*TTj)
               OmegaSi=ChPar(jjj+16,Mi)*exp(TDep(jjj+16)*TTi)
@@ -1405,12 +1571,14 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
             Fraci =ChPar(3,     Mi)*exp(TDep(3)     *TTi)
             xKsi  =ChPar(jjj+ 7,Mi)*exp(TDep(jjj+ 7)*TTi)
             xNui  =ChPar(jjj+ 8,Mi)*exp(TDep(jjj+ 8)*TTi)
-            fExpi =ChPar(jjj+ 9,Mi) !*exp(TDep(jjj+ 9)*TTi)
+            fExpi =ChPar(jjj+ 9,Mi)*exp(TDep(jjj+ 9)*TTi)
+            if(lFumig) fExpi=ChPar(jjj+9,Mi)
             roj   =ChPar(1,     Mj)*exp(TDep(1)     *TTj)
             Fracj =ChPar(3,     Mj)*exp(TDep(3)     *TTj)
             xKsj  =ChPar(jjj+ 7,Mj)*exp(TDep(jjj+ 7)*TTj)
             xNuj  =ChPar(jjj+ 8,Mj)*exp(TDep(jjj+ 8)*TTj)
-            fExpj =ChPar(jjj+ 9,Mj) !*exp(TDep(jjj+ 9)*TTj)
+            fExpj =ChPar(jjj+ 9,Mj)*exp(TDep(jjj+ 9)*TTj)
+            if(lFumig) fExpj=ChPar(jjj+9,Mj)
             cci   =Conc(jS,i)
             ccj   =Conc(jS,j)
             SorbEi=0.
@@ -1489,6 +1657,13 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
        	  end if
         end if
 10      continue
+c        if(.not.lEquil.and.lBact) then
+        lMyriam=.false.
+        if(lMyriam) then        
+          GamL  =ChPar(jjj+11,Mi)*exp(TDep(jjj+11)*TTi)
+          roi   =ChPar(1,     Mi)*exp(TDep(1)     *TTi)
+          Sorb3(jS,i)=Sorb3(jS,i)+dt*epsi*GamL*theta(i)/roi*Conc(jS,i)
+        end if
 11    continue
 
       return
@@ -1522,6 +1697,7 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
           else if(iDualPor.gt.0) then
             ThImob=ThIm(i)
           end if
+c          ThG=amax1(0.,thSat(M)-ThW+thSIm(M)-ThImob)
         end if
         TT=(Temp(i)+273.15-Tr)/R/(Temp(i)+273.15)/Tr
         Dw   =ChPar(jjj+ 5,M)*exp(TDep(jjj+ 5)*TT)
@@ -1538,7 +1714,9 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
           TauG=1.
         end if
         qW=v(i)
-        Disp=ChPar(2,M)*abs(qW)/ThW+Dw*TauW+ThG/ThW*Dg*Henry*TauG
+        Disp=Dw*TauW
+        if(ThW.gt.0.) 
+     !    Disp=Disp+ChPar(2,M)*abs(qW)/ThW+ThG/ThW*Dg*Henry*TauG
         cGrad=0.
         if(i.eq.1) then
           cGrad=(Conc(jS,i+1)-Conc(jS,i))/(x(i+1)-x(i))
@@ -1563,11 +1741,15 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
       real Minf
 
       psi=1.
-      if     (iPsi.eq.1) then
+      if     (iPsi.eq.1) then            ! Langmuirian (time-dependent) blocking
         if(SMax.gt.0.) psi=1.-ss/SMax
-      else if(iPsi.eq.2) then
+      else if(iPsi.eq.2) then            ! Ripening
         if(SMax.gt.0.) psi=max(ss**SMax,psi)
-      else if(iPsi.eq.3) then
+      else if(iPsi.eq.3) then            ! Random sequential adsorption
+        if(SMax.le.0.) then
+          psi=1.
+          return
+        end if
         Binf=1./SMax
         Sinf=.546
         Minf=Dc
@@ -1576,9 +1758,11 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
      !    psi=1.-(4.*const)+(3.08*const**2.)+(1.4069*const**3.)
         if(ss.gt.(0.8*SMax))
      !    psi=((1.-Binf*ss)**3.)/(2.*(Minf**2.)*(Binf**3.))
-      else if(iPsi.eq.4) then
+c        psi=((1.-Binf*ss)**3.)/(2.*(Minf**2.)*(Binf**3.))
+        write(*,*) smax,dc,psi,ipsi
+      else if(iPsi.eq.4) then            ! Depth-dependent (Scott's) blocking
         if(SMax.gt.0..and.Dc.gt.0.) psi=((abs(x)+Dc)/Dc)**(-SMax)
-      else if(iPsi.eq.5) then
+      else if(iPsi.eq.5) then            ! Time- and depth-dependent blocking
         if(SMax.gt.0..and.Dc.gt.0.) psi=((abs(x)+Dc)/Dc)**(-SMax)
         if(SMax2.gt.0.) psi=psi*(1.-ss/SMax2)
       end if
@@ -1588,7 +1772,9 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
 
 *************************************************************************
 
-*     Calculate the deposition coefficient for the bacteria transport,
+*     Calculate the deposition coefficient for the bacteria transport, 
+*     using Filtration theory [Rajagopalan and Tien, 1976; Logan et al., 1995]
+
 *     All calculations within this subroutines are in meters and seconds
 *     Conversions are needed
 
@@ -1651,6 +1837,13 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
       Ka2=3.*(1.-Theta)/2./dc*eta*Alfa2*PVeloc
       Ka2=Ka2/tConv
 
+c      Filtration Theory based on Scott Bradford
+c      Ka1=3.*(1.-Theta)/2./dc*(e_diff+e_grav)*Alfa1*PVeloc
+c      Ka1=Ka1/tConv
+c      Ka2=3.*(1.-Theta)/2./dc* e_inter       *Alfa2*PVeloc
+c      Ka2=Ka2/tConv
+c      if(Alfa2.eq.0.) Ka1=Ka1+Ka2
+
       return
       end
 
@@ -1660,9 +1853,9 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
 
       subroutine NonEqInit(NumNP,NSD,NS,NMat,MatNum,TDep,Temp,ChPar,
      !                     Conc,Sorb,lLinear,lMobIm,iDualPor,lBact,
-     !                     Sorb2,Theta)
+     !                     Sorb2,Theta,lFumig)
 
-      logical lLinear(NSD),lMobIm(NMat),lBact
+      logical lLinear(NSD),lMobIm(NMat),lBact,lFumig
       dimension ChPar(NSD*16+4,NMat),MatNum(NumNP),TDep(NSD*16+4),
      !          Conc(NSD,NumNP),Sorb(NSD,NumNP),Sorb2(NSD,NumNP),
      !          Temp(NumNP),Theta(NumNP)
@@ -1681,21 +1874,25 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
             Frac =ChPar(3,     M)*exp(TDep(3)     *TT)
             xKs  =ChPar(jjj+ 7,M)*exp(TDep(jjj+ 7)*TT)
             xNu  =ChPar(jjj+ 8,M)*exp(TDep(jjj+ 8)*TT)
-            fExp =ChPar(jjj+ 9,M) !*exp(TDep(jjj+ 9)*TT)
+            fExp =ChPar(jjj+ 9,M)*exp(TDep(jjj+ 9)*TT)
+            if(lFumig) fExp=ChPar(jjj+9,M)
             SConc=1.
             cc=Conc(jS,i)
             if(.not.lLinear(jS).and.cc.gt.0.) 
      !        SConc=cc**(fExp-1.)/(1.+xNu*cc**fExp)
             Sorb(jS,i)=(1.-Frac)*SConc*xKs*cc
             if(lBact) then
-              Frac=0.
               rKa1=ChPar(jjj+19,M)*exp(TDep(jjj+19)*TT)
               rKd1=ChPar(jjj+20,M)*exp(TDep(jjj+20)*TT)
-              xKs1=Theta(i)*rKa1/ro/rKd1 
+              xKs1=0.
+              if(ro.gt.0..and.rKd1.gt.0.) 
+     !          xKs1=Theta(i)*rKa1/ro/rKd1 
               Sorb(jS,i)=xKs1*Conc(jS,i)
               rKa2=ChPar(jjj+16,M)*exp(TDep(jjj+16)*TT)
               rKd2=ChPar(jjj+17,M)*exp(TDep(jjj+17)*TT)
-              xKs2=Theta(i)*rKa1/ro/rKd1 
+              xKs2=0.
+              if(ro.gt.0..and.rKd2.gt.0.) 
+     !          xKs2=Theta(i)*rKa2/ro/rKd2 
               Sorb2(jS,i)=xKs2*Conc(jS,i)
             end if
           end if
@@ -1705,10 +1902,151 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
       return
       end
 
+*************************************************************************
+
+*     Dissolution of the solid phase (NAPL)
+
+      subroutine Dissol(NumNP,NSD,NS,NMat,MatNum,TDep,Temp,ChPar,
+     !                  Conc,Sorb2,ThN,ThNIm,iDualPor,thSat,lMobIm,x,
+     !                  dt,cvChIm)
+
+      logical   lMobIm(NMat)
+      dimension ChPar(NSD*16+4,NMat),MatNum(NumNP),TDep(NSD*16+4),
+     !          Conc(NSD,NumNP),Sorb2(NSD,NumNP),Temp(NumNP),
+     !          ThN(NumNP),ThNIm(NumNP),thSat(NMat),cvChIm(NS),
+     !          x(NumNP)
+
+      Tr=293.15
+      R=8.314
+      do 10 jS=1,NS
+        cvChIm(jS)=0.
+10    continue
+      do 13 i=1,NumNP
+        if(i.eq.1) then
+          dx=(x(2)-x(1))/2.
+        else if(i.eq.NumNP) then 
+          dx=(x(NumNP)-x(NumNP-1))/2.
+        else
+          dx=x(i+1)-x(i-1)
+        end if
+        M=MatNum(i)
+        TT=(Temp(i)+273.15-Tr)/R/(Temp(i)+273.15)/Tr
+        ro   =ChPar(1,     M)*exp(TDep(1)     *TT)
+        Frac =ChPar(3,     M)*exp(TDep(3)     *TT)
+        ThW=ThN(i)
+        if(lMobIm(M)) then
+          if(iDualPor.eq.0) then
+            ThImob=ChPar(4,M)
+            ThW=amax1(ThW-ThImob,0.001)
+          else if(iDualPor.gt.0) then
+            ThImob=ThNIm(i)
+          end if
+        end if
+        ThG=amax1(0.,thSat(M)-ThW)
+        SorbTot=0.
+        do 11 jSS=1,NS
+          SorbTot=SorbTot+Sorb2(jSS,i)
+11      continue
+        do 12 jS=1,NS
+          jjj=(jS-1)*16
+          xKs  =ChPar(jjj+ 7,M)*exp(TDep(jjj+ 7)*TT)
+          Henry=ChPar(jjj+10,M)*exp(TDep(jjj+10)*TT)
+          cMax =ChPar(jjj+16,M)*exp(TDep(jjj+16)*TT)
+          XXX=1.
+          if(SorbTot.gt.0.) XXX=amax1(0.001,Sorb2(jS,i)/SorbTot)
+c          Omega=min(Omega,ThNew(i)*(cMax*XXX-Conc(jS,i))/dt/ro)
+          cDiff =0.
+          cDiff1=0.
+          if(Sorb2(jS,i).gt.0..and.Conc(jS,i).lt.cMax*XXX) then  ! Dissolution
+            cDiff=amin1((cMax*XXX-Conc(jS,i))*
+     !                  (ThW+ThG*Henry+ro*xKs*Frac),Sorb2(jS,i)*ro)
+            cDiff1=cDiff/(ThW+ThG*Henry+ro*xKs*Frac)*ThW
+          end if
+          if(Conc(jS,i).gt.cMax*XXX) then                        ! Precipitation
+            cDiff=(cMax*XXX-Conc(jS,i))*(ThW+ThG*Henry+ro*xKs*Frac)
+            cDiff1=cDiff/(ThW+ThG*Henry+ro*xKs*Frac)*ThW
+          end if
+          Conc(jS,i)=Conc(jS,i)+cDiff1/ThW
+          Sorb2(jS,i)=Sorb2(jS,i)-cDiff/ro
+          cvChIm(jS)=cvChIm(jS)+dx/2.*cDiff/dt
+12      continue
+13    continue
+
+      return
+      end
+
+************************************************************************
+
+*     Subroutine written by Scott Bradford to calculate water content
+*     accessible to colloids and flux increase due to colloid exclusion
+*     Described in the file "Theory/Filtration.doc
+
+      subroutine Colloid_Parm(NumNPD,NumNP,NMat,MatNum,ThN_c,vN_c,ThNew,
+     !                        vNew,Par,ChPar,lColloid,NSD)
+
+      logical lColloid
+      integer M,NumNPD,NumNP,NMat,NSD,MatNum
+
+      double precision thr,ths,swr,alpha,vgn1,vgn2,vgm1,vgm2,Pc_c,
+     !                 sw_c_eff,sw_c,sw,sw_eff,kr_c,krw,r_c
+
+      dimension MatNum(NumNPD)
+      dimension ThN_c(NumNPD),vN_c(NumNPD),ThNew(NumNPD),vNew(NumNPD)
+      dimension Par(11,NMat),ChPar(NSD*16+4,NMat)
+
+      lColloid=.true.
+      if(.not.lColloid) goto 100
+
+      do 11 i=1,NumNP
+        M=MatNum(i)
+        sw_c=ChPar(6,M)   ! Saturation from which colloids are excluded
+        thr=Par(1,M)
+        ths=Par(2,M)
+        swr=thr/ths
+        alpha=Par(3,M)
+        vgn1=Par(4,M)
+        xL=Par(6,M)
+        vgm1=1.0-1.0/vgn1
+        vgn2=vgn1+1
+        vgm2=1.0-2.0/vgn2
+
+*       Accessible Water Content to Colloid (equation 1)
+        ThN_c(i)=ThNew(i)-ths*sw_c
+        sw=ThNew(i)/ths
+        sw_eff=(sw-swr)/(1.0-swr)
+        sw_c_eff=(sw_c-swr)/(1.0-swr)
+
+*       Colloid Permeability according to Burdine Model (equation 2)
+        if(sw_eff.gt.sw_c_eff) then
+          kr_c=(sw_eff**2.0)*(((1.0-sw_c_eff**(1.0/vgm2))**vgm2)-
+     !                        ((1.0-sw_eff  **(1.0/vgm2))**vgm2)) 
+        else
+          kr_c=0.0
+        end if
+
+*       Mualem Water Relative Permeability (equation 3)
+        if(sw_eff.gt.0.0) then
+      	  krw=(sw_eff**xL)*(1-(1-sw_eff**(1/vgm1))**vgm1)**2.0
+          vN_c(i)=vNew(i)*kr_c/krw
+        else
+          krw=0.0
+          vN_c(i)=vNew(i)
+        end if
+
+*       Convert sw_c (saturation accessible to collids) to r_c (radius accessible to colloids)
+        Pc_c=(1.0/alpha)*(sw_c_eff**(-1./vgm1)-1)**(1.0/vgn1) 
+        r_c=(2.0*72.0)/(Pc_c*981.0)   ! alpha, Pc_c, r_c must be in [cm]
+c        write(*,*) "r_c microns", 10000.*r_c
+11    continue
+
+100   return
+      end
+
 ************************************************************************
 
 *     Subroutine calculating accesible water content for colloids and colloid velocity
 *     Only for steady-state water flow and homogeneous soil profile
+*     Described in the file "Theory/Filtration.doc
 
       subroutine Exclusion(NumNP,NMat,NSD,Par,ChPar,ThNew,vNew,ThOld,
      !                      vOld)
@@ -1738,14 +2076,13 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
         read(*,*)
       end if
 
-*     Accessible Water Content to Colloid
+*     Accessible Water Content to Colloid (equation 1)
       ThC=ThNew(1)-ths*sw_c
-
       sw=ThNew(1)/ths
       sw_eff=(sw-swr)/(1.0-swr)
       sw_c_eff=(sw_c-swr)/(1.0-swr)
 
-*     Colloid Permeability according to Burdine Model
+*     Colloid Permeability according to Burdine Model (equation 2)
       if(sw_eff.gt.sw_c_eff) then
         kr_c=(sw_eff**2.0)*(((1.0-sw_c_eff**(1.0/vgm2))**vgm2)-
      !                      ((1.0-sw_eff  **(1.0/vgm2))**vgm2)) 
@@ -1753,7 +2090,7 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
         kr_c=0.0
       end if
 
-*     Mualem Water Relative Permeability
+*     Mualem Water Relative Permeability (equation 3)
       if(sw_eff.gt.0.0) then
       	krw=(sw_eff**xL)*(1-(1-sw_eff**(1/vgm1))**vgm1)**2.0
         VelC=vNew(1)*kr_c/krw
@@ -1762,9 +2099,9 @@ c          if(abs(DD).gt.1.e-20)dtMax=amin1(dtMax,10.*RThE*dx*dx/2./DD)
         VelC=vNew(1)
       end if
 
-*     Convert sw_c to r_c
+*     Convert sw_c (saturation accessible to collids) to r_c (radius accessible to colloids)
       Pc_c=(1.0/alpha)*(sw_c_eff**(-1./vgm1)-1)**(1.0/vgn1) 
-      r_c=(2.0*72.0)/(Pc_c*981.0)
+      r_c=(2.0*72.0)/(Pc_c*981.0)   ! alpha, Pc_c, r_c must be in [cm]
       PorVelSolute=vNew(1)/ThNew(1)
       PorVelColloid=VelC/ThC
 c     write(*,*) "r_c microns", 10000.*r_c
@@ -1790,7 +2127,7 @@ c     write(*,*) "r_c microns", 10000.*r_c
       dimension DMoist(NMatD,NSD,13,6)
 
       iLengthPath = Len_Trim(cDataPath)
-      cFileName = cDataPath(1:iLengthPath)//'\MoistDep.in'
+      cFileName = cDataPath(1:iLengthPath)//'/MOISTDEP.IN'
       open(15,file=cFileName, status='unknown',err=901)
 
       read(15,*,err=902)
@@ -1857,8 +2194,15 @@ c     write(*,*) "r_c microns", 10000.*r_c
         end if
       else if(iMoistDep.eq.1) then ! Walker's formula
         jjj=(jS-1)*9
-        if(WDep(2+M,jjj+iReact).gt.Theta.and.WDep(2+M,jjj+iReact).gt.0.) 
+c        ! Reduces rates at only low water contents (for positive beta)
+c        if(WDep(2+M,jjj+iReact).gt.Theta.and.WDep(2+M,jjj+iReact).gt.0.) 
+c        ! Reduces rates at both low (positive beta) and large (negative beta) water contents
+        if(WDep(2+M,jjj+iReact).gt.0.) 
      !    rMD=(Theta/WDep(2+M,jjj+iReact))**WDep(1,jjj+iReact)
+*     Greg Butters alternative exponential function
+c        if(WDep(1,jjj+iReact).gt.0.) 
+c     !    rMD=exp(-(Theta-WDep(2+M,jjj+iReact))**2
+c     !        /2./WDep(1,jjj+iReact)**2)
       end if
 
       return
@@ -1905,14 +2249,102 @@ c     write(*,*) "r_c microns", 10000.*r_c
       return
       end
 
+************************************************************************
+
+      subroutine AddFumig(NumNP,NMat,ThN,x,MatNum,Conc,ChPar,ths,Temp,
+     !                    NS,NSD,lLinear,lEquil,FumMass,zAddFT,zAddFB,
+     !                    TDep,cVolI,lMinStep,tAddFum,tMax)
+
+      logical lLinear(NS),lEquil,lMinStep
+      double precision tAddFum,tMax
+      dimension ThN(NumNP),x(NumNP),MatNum(NumNP),Conc(NSD,NumNP),
+     !          ChPar(NSD*16+4,NMat),ths(NMat),Temp(NumNP),
+     !          TDep(NSD*16+4),cVolI(NS)
+
+      jS=1
+      if(.not.lLinear(jS).or..not.lEquil) then
+        write(*,*) 'Fumigant application is implemented only for linear 
+     !equilibrium transport!'
+	  stop
+      end if
+
+      Tr=293.15
+      R=8.314
+      jjj=(jS-1)*16
+      VNewi=0.
+
+      do 11 i=NumNP-1,1,-1
+        j=i+1
+        Mi=MatNum(i)
+        Mj=MatNum(j)
+        dx=x(j)-x(i)
+        TT=(Temp(i)+Temp(j))/2.+273.15
+        xx=0.0
+        if(x(j).gt.-zAddFT.and.x(i).le.-zAddFT) then
+          xx=0.5
+        else if(x(j).ge.-zAddFB.and.x(i).lt.-zAddFB) then
+          xx=0.5
+        else if(-zAddFT.ge.x(j).and.-zAddFB.le.x(i)) then
+          xx=1.0
+        end if
+        ThWi=ThN(i)
+        ThWj=ThN(j)
+        ThGi=amax1(0.,ths(Mi)-ThWi)
+        ThGj=amax1(0.,ths(Mj)-ThWj)
+
+        TTi=(Temp(i)+273.15-Tr)/R/TT/Tr
+        xKsi  =ChPar(jjj+ 7,Mi)*exp(TDep(jjj+ 7)*TTi)
+        Henryi=ChPar(jjj+10,Mi)*exp(TDep(jjj+10)*TTi)
+        TTj=(Temp(j)+273.15-Tr)/R/TT/Tr
+        xKsj  =ChPar(jjj+ 7,Mj)*exp(TDep(jjj+ 7)*TTj)
+        Henryj=ChPar(jjj+10,Mj)*exp(TDep(jjj+10)*TTj)
+
+        VNewi=VNewi+dx*((thWi+ChPar(1,Mi)*xKsi+thGi*Henryi)+
+     !                  (thWj+ChPar(1,Mj)*xKsj+thGj*Henryj))/2.*xx
+11    continue
+      cAdd=0.
+      if(vNewi.gt.0.) cAdd=FumMass/VNewi
+      do 12 i=1,NumNP
+        if(-zAddFT.ge.x(i).and.-zAddFB.le.x(i))
+     !    Conc(jS,i)=Conc(jS,i)+cAdd
+12    continue
+
+      cVolI(1)=cVolI(1)+FumMass
+      tAddFum=tMax+1.e+10
+      lMinStep=.true.
+
+      return
+      end
+
+************************************************************************
+
+*     Subroutine determining if solute is present 
+*     (to limit or not the time step)
+
+      subroutine IsSolutePresent(lIsSolPres,NSD,NS,NumNP,Conc)
+
+      logical lIsSolPres
+      dimension Conc(NSD,NumNP)
+
+      ConcMin=1.e-20
+      lIsSolPres=.false.
+      do 12 jS=1,NS
+        do 11 i=1,NumNP
+          if(Conc(jS,i).gt.ConcMin) lIsSolPres=.true.
+11      continue
+12    continue
+
+      return
+      end
+
 *************************************************************************
 
 *     Distribute mass into different phases
 
       subroutine MassInit(NumNP,NSD,NS,NMat,MatNum,TDep,Temp,ChPar,
-     !                    Conc,Theta,ThetaIm,ThSat,lLinear,lBact)
+     !                    Conc,Theta,ThetaIm,ThSat,lLinear,lBact,lFumig)
 
-      logical lLinear(NS),lBact
+      logical lLinear(NS),lBact,lFumig
       dimension ChPar(NSD*16+4,NMat),MatNum(NumNP),TDep(NSD*16+4),
      !          Conc(NSD,NumNP),Temp(NumNP),Theta(NumNP),ThSat(NMat),
      !          ThetaIm(NumNP),Par(10)
@@ -1929,21 +2361,28 @@ c     write(*,*) "r_c microns", 10000.*r_c
             Par(2)=ChPar(3,     M)*exp(TDep(3)     *TT) !frac
             Par(3)=ChPar(jjj+ 7,M)*exp(TDep(jjj+ 7)*TT) !xKs
             Par(4)=ChPar(jjj+ 8,M)*exp(TDep(jjj+ 8)*TT) !xNu
-            Par(5)=ChPar(jjj+ 9,M) !*exp(TDep(jjj+ 9)*TT) !fExp
-            Par(6)=ChPar(jjj+10,M)*exp(TDep(jjj+ 7)*TT) !xKH
+            Par(5)=ChPar(jjj+ 9,M)*exp(TDep(jjj+ 9)*TT) !fExp
+            if(lFumig) Par(5)=ChPar(jjj+9,M)
+            Par(6)=ChPar(jjj+10,M)*exp(TDep(jjj+10)*TT) !xKH
             Par(7)=Theta(i)+ThetaIm(i)
             Par(8)=ThSat(M)-Par(7)
             if(lBact) then
               rKa1=ChPar(jjj+19,M)*exp(TDep(jjj+19)*TT)
               rKd1=ChPar(jjj+20,M)*exp(TDep(jjj+20)*TT)
-              xKs1=Theta(i)*rKa1/Par(1)/rKd1 
+              xKs1=0.
+              if(Par(1).gt.0..and.rKd1.gt.0.) 
+     !          xKs1=Theta(i)*rKa1/Par(1)/rKd1 
               rKa2=ChPar(jjj+16,M)*exp(TDep(jjj+16)*TT)
               rKd2=ChPar(jjj+17,M)*exp(TDep(jjj+17)*TT)
-              xKs2=Theta(i)*rKa1/Par(1)/rKd1
-              Par(3)=xKs1+xKs2 
+              xKs2=0.
+              if(Par(1).gt.0..and.rKd2.gt.0.) 
+     !          xKs2=Theta(i)*rKa2/Par(1)/rKd2
+              Par(3)=Par(3)*Par(2)+xKs1+xKs2 
             end if
             if(lLinear(jS)) then
-              Conc(jS,i)=Conc(jS,i)/(Par(7)+Par(1)*Par(3)+Par(8)*Par(6))
+              if(Par(7)+Par(1)*Par(3)+Par(8)*Par(6).gt.0.)
+     !          Conc(jS,i)=Conc(jS,i)/
+     !                            (Par(7)+Par(1)*Par(3)+Par(8)*Par(6))
             else
               Conc(jS,i)=cInit(Conc(jS,i),Par,NPar)
             end if
@@ -1963,8 +2402,8 @@ c     write(*,*) "r_c microns", 10000.*r_c
 
       dimension Par(NPar)
 
-      x1=1.e-3
-      x2=1.e+3
+      x1=1.e-8
+      x2=1.e+5
       call ZBRAK1(X1,X2,XB1,XB2,xMass,Par,NPar)
       cInit=ZBRENT1(XB1,XB2,xMass,Par,NPar)
 
@@ -1980,7 +2419,8 @@ c     write(*,*) "r_c microns", 10000.*r_c
       dimension Par(NPar)
 
       ro=Par(1)
-      frac=Par(2)
+      frac=1.
+c      frac=Par(2)   ! for tillage
       xKs=Par(3)
       xNu=Par(4)
       fExp=Par(5)
@@ -1988,7 +2428,7 @@ c     write(*,*) "r_c microns", 10000.*r_c
       Theta=Par(7)
       ThetaA=Par(8)
 
-      yMass=Theta*Conc+ro*xKs*Conc**fExp/(1.+xNu*Conc**fExp)+
+      yMass=Theta*Conc+ro*xKs*frac*Conc**fExp/(1.+xNu*Conc**fExp)+
      !      ThetaA*xKH*Conc
       SolMass=xMass-yMass
 

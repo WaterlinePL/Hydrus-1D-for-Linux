@@ -9,9 +9,10 @@
 *             10: fractal model (Shlomo Orr)
 *     lAltern = VG model with alfa and n different for retention curve 
 *               and hydraulic conductivity function. (iModel=1)
-*               One needs to comment out line 250 in input2.for
+*               One needs to comment out lines 690-691 in input.for
 *     lUnBound = Unbound n and m in VG-M function.
 *                one needs to uncheck m=Par(6) in other routines as well.
+*     van Genuchten - Burdine model, uncomment all lines with "Burdine"
 
       real function FK(iModel,h,Par)
 
@@ -30,6 +31,7 @@
       if(iModel.eq.0.or.iModel.eq.1.or.iModel.eq.3) then    ! VG and modified VG
 *        BPar=.5d0
         PPar=2
+c        PPar=1  ! Burdine
         if(iModel.eq.0.or.iModel.eq.3) then
           Qm=Qs
           Qa=Qr
@@ -53,6 +55,7 @@
         end if
         if(iModel.eq.3) Qm=Par(7)
         m=1.d0-1.d0/n
+c        m=1.d0-2.d0/n  ! Burdine
         lUnBound=.false.
         if(lUnBound) then
           m=Par(6)
@@ -167,11 +170,15 @@ c            Kr=dexp(-BPar*dble(h))
           FK=sngl(Ks)
         end if
       else if(iModel.eq.5) then                  ! Dual-porosity model
+        PPar=2
+c        PPar=1  ! Burdine
         w2=Par(7)
         Alfa2=Par(8)
         n2=Par(9)
         m =1.d0-1.d0/n
         m2=1.d0-1.d0/n2
+c        m =1.d0-2.d0/n   ! Burdine
+c        m2=1.d0-2.d0/n2  ! Burdine
         w1=1.d0-w2
         Sw1=w1*(1.d0+(-Alfa *h)**n )**(-m )
         Sw2=w2*(1.d0+(-Alfa2*h)**n2)**(-m2)
@@ -182,7 +189,7 @@ c            Kr=dexp(-BPar*dble(h))
         Sk2=w2*Alfa2*(1.d0-Sv2*(1.d0+(-Alfa2*h)**n2)**(-m2))
         rNumer=Sk1+Sk2
         rDenom=w1*Alfa+w2*Alfa2
-        if(rDenom.ne.0.) Kr=Qe**BPar*(rNumer/rDenom)**2
+        if(rDenom.ne.0.) Kr=Qe**BPar*(rNumer/rDenom)**PPar
         FK=sngl(max(Ks*Kr,1.d-37))
       else if(iModel.eq.-1) then                  ! Shlomo Orr
         ha=Alfa
@@ -218,6 +225,7 @@ c            Kr=dexp(-BPar*dble(h))
         end if
         if(iModel.eq.3) Qm=Par(7)
         m=1.d0-1.d0/n
+c        m=1.d0-2.d0/n  ! Burdine
 c        m=Par(6)
         HMin=-1.d300**(1.d0/n)/max(Alfa,1.d0)
         HH=max(dble(h),HMin)
@@ -227,6 +235,7 @@ c        m=Par(6)
           C1=(1.d0+(-Alfa*HH)**n)**(-m-1.d0)
           C2=(Qm-Qa)*m*n*(Alfa**n)*(-HH)**(n-1.d0)*C1
           FC=sngl(max(C2,1.d-37))
+!          FC=sngl(max(C2,1.e-5)) ! Adam S 06.07.2020
           return
         else
           FC=0.0
@@ -254,6 +263,8 @@ c        m=Par(6)
         n2=Par(9)
         m =1.d0-1.d0/n
         m2=1.d0-1.d0/n2
+c        m =1.d0-2.d0/n   ! Burdine
+c        m2=1.d0-2.d0/n2  ! Burdine
         w1=1.d0-w2
         C1a=(1.d0+(-Alfa *h)**n )**(-m -1.d0)
         C1b=(1.d0+(-Alfa2*h)**n2)**(-m2-1.d0)
@@ -296,6 +307,7 @@ c        m=Par(6)
         end if
         if(iModel.eq.3) Qm=Par(7)
         m=1.d0-1.d0/n
+c        m=1.d0-2.d0/n  ! Burdine
 c        m=Par(6)
         HMin=-1.d300**(1.d0/n)/max(Alfa,1.d0)
         HH=max(dble(h),HMin)
@@ -330,6 +342,8 @@ c        m=Par(6)
         n2=Par(9)
         m =1.d0-1.d0/n
         m2=1.d0-1.d0/n2
+c        m =1.d0-2.d0/n   ! Burdine
+c        m2=1.d0-2.d0/n2  ! Burdine
         w1=1.d0-w2
         Sw1=w1*(1.d0+(-Alfa *h)**n )**(-m )
         Sw2=w2*(1.d0+(-Alfa2*h)**n2)**(-m2)
@@ -367,6 +381,7 @@ c        m=Par(6)
         end if
         if(iModel.eq.3) Qm=Par(7)
         m=1.d0-1.d0/n
+c        m=1.d0-2.d0/n  ! Burdine
 c        m=Par(6)
         HMin=-1.d300**(1.d0/n)/max(Alfa,1.d0)
         QeeM=(1.d0+(-Alfa*HMin)**n)**(-m)
@@ -394,6 +409,8 @@ c        m=Par(6)
         n2=Par(9)
         m =1.d0-1.d0/n
         m2=1.d0-1.d0/n2
+c        m =1.d0-2.d0/n   ! Burdine
+c        m2=1.d0-2.d0/n2  ! Burdine
         w1=1.d0-w2
         Qee=Qe
         if(Qee.gt.0.9999d0) then
@@ -438,6 +455,7 @@ c        m=Par(6)
         end if
         if(iModel.eq.3) Qm=Par(7)
         m=1.d0-1.d0/n
+c        m=1.d0-2.d0/n  ! Burdine
 c        m=Par(6)
         Qees=dmin1((Qs-Qa)/(Qm-Qa),.999999999999999d0)
         Hs=-1.d0/Alfa*(Qees**(-1.d0/m)-1.d0)**(1.d0/n)
@@ -472,6 +490,8 @@ c        m=Par(6)
         n2=Par(9)
         m =1.d0-1.d0/n
         m2=1.d0-1.d0/n2
+c        m =1.d0-2.d0/n   ! Burdine
+c        m2=1.d0-2.d0/n2  ! Burdine
         w1=1.d0-w2
         Sw1=w1*(1.d0+(-Alfa *h)**n )**(-m )
         Sw2=w2*(1.d0+(-Alfa2*h)**n2)**(-m2)
@@ -505,6 +525,7 @@ c        m=Par(6)
       BPar=Par(6)
       if(iModel.eq.0.or.iModel.eq.1.or.iModel.eq.3) then     ! VG and modified VG
         PPar=2
+c        PPar=1 ! Burdine
         if(iModel.eq.0.or.iModel.eq.3) then
           Qm=Qs
           Qa=Qr
@@ -518,6 +539,7 @@ c        m=Par(6)
         end if
         if(iModel.eq.3) Qm=Par(7)
         m=1.d0-1.d0/n
+c        m=1.d0-2.d0/n  ! Burdine
         Qees=dmin1((Qs-Qa)/(Qm-Qa),.999999999999999d0)
         Qeek=dmin1((Qk-Qa)/(Qm-Qa),Qees)
         if(dble(th).lt.Qk) then
@@ -569,6 +591,7 @@ c        m=Par(6)
       BPar=Par(6)
       if(iModel.eq.0.or.iModel.eq.1.or.iModel.eq.3) then   ! VG and modified VG
         PPar=2
+c        PPar=1  ! Burdine
         if(iModel.eq.0.or.iModel.eq.3) then
           Qm=Qs
           Qa=Qr
@@ -582,6 +605,7 @@ c        m=Par(6)
         end if
         if(iModel.eq.3) Qm=Par(7)
         m=1.d0-1.d0/n
+c        m=1.d0-2.d0/n  ! Burdine
         Qees=dmin1((Qs-Qa)/(Qm-Qa),.999999999999999d0)
         Qeek=dmin1((Qk-Qa)/(Qm-Qa),Qees)
         th=S*(Qs-Qr)+Qr
@@ -854,19 +878,22 @@ c        xMualem=1./hhh ! for integration
 
 ************************************************************************
 
+*     The  QROMB  function evaluates the integral of a function 
+*     over the closed interval [A,B] using  Romberg integration.
+
       subroutine qromb(a,b,ss,iModel,Par)
-      integer JMAX,JMAXP,K,KM,iModel
-      real a,b,ss,EPS,Par(11)
-      parameter (eps=1.e-6, jMax=20, jMaxP=jMax+1, K=5, KM=K-1)
+      integer jMax,jMaxP,k,km,iModel
+      real a,b,ss,eps,Par(11)
+      parameter (eps=1.e-6, jMax=20, jMaxP=jMax+1, k=10, km=k-1)
       integer j
-      real dss,h(JMAXP),s(JMAXP)
+      real dss,h(jMaxP),s(jMaxP)
 
       h(1)=1.
       do 11 j=1,jMax
         call trapzd(a,b,s(j),j,iModel,Par)
-        if (j.ge.K) then
-          call polint(h(j-KM),s(j-KM),K,0.,ss,dss)
-          if (abs(dss).le.eps*abs(ss)) return
+        if(j.ge.k) then
+          call polint(h(j-km),s(j-km),k,0.,ss,dss)
+          if(abs(dss).le.eps*abs(ss)) return
         endif
         s(j+1)=s(j)
         h(j+1)=0.25*h(j)
@@ -882,7 +909,7 @@ c        xMualem=1./hhh ! for integration
       integer it,j,iModel
       real del,sum,tnm,x,Par(11)
 
-      if (n.eq.1) then
+      if(n.eq.1) then
         s=0.5*(b-a)*(FH(iModel,a,Par)+FH(iModel,b,Par))
       else
         it=2**(n-2)
@@ -902,17 +929,17 @@ c        xMualem=1./hhh ! for integration
 ************************************************************************
 
       subroutine polint(xa,ya,n,x,y,dy)
-      integer n,NMAX
+      integer n,NMax
       real dy,x,y,xa(n),ya(n)
-      parameter (NMAX=10)
+      parameter (NMax=10)
       integer i,m,ns
-      real den,dif,dift,ho,hp,w,c(NMAX),d(NMAX)
+      real den,dif,dift,ho,hp,w,c(NMax),d(NMax)
 
       ns=1
       dif=abs(x-xa(1))
       do 11 i=1,n
         dift=abs(x-xa(i))
-        if (dift.lt.dif) then
+        if(dift.lt.dif) then
           ns=i
           dif=dift
         endif
@@ -932,7 +959,7 @@ c        xMualem=1./hhh ! for integration
           d(i)=hp*den
           c(i)=ho*den
 12      continue
-        if (2*ns.lt.n-m)then
+        if(2*ns.lt.n-m)then
           dy=c(ns+1)
         else
           dy=d(ns)
